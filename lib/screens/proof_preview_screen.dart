@@ -13,8 +13,8 @@ import 'package:video_player/video_player.dart';
 import 'package:chewie/chewie.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
-import 'package:ffmpeg_kit_flutter_new/return_code.dart';
+import 'package:video_thumbnail/video_thumbnail.dart';
+import 'package:path_provider/path_provider.dart';
 import 'success_screen.dart';
 import 'verification_failure_screen.dart';
 
@@ -153,16 +153,11 @@ class _ProofPreviewScreenState extends State<ProofPreviewScreen> {
         final frames = await _extractFrames();
         if (frames.isEmpty) throw Exception('Could not process video frames for verification.');
 
-        // 2. Extract Audio
-        currentStep = 'Extracting Audio';
-        final audioData = await _extractAudio();
-
-        // 3. Call AI Service
+        // 2. Call AI Service
         final result = await AiService().verifyDareProof(
           title: widget.dareTitle!,
           instructions: widget.dareInstructions ?? '',
           frames: frames,
-          audioData: audioData,
         );
 
         // 3. Check Threshold
@@ -326,31 +321,5 @@ class _ProofPreviewScreenState extends State<ProofPreviewScreen> {
     return frames;
   }
 
-  Future<Uint8List?> _extractAudio() async {
-    try {
-      final tempDir = await getTemporaryDirectory();
-      final audioPath = '${tempDir.path}/temp_audio_${const Uuid().v4()}.aac';
-      
-      // Extract audio using FFmpeg
-      // -i: input, -vn: no video, -acodec aac: standard aac, -b:a 128k: bitrate
-      final session = await FFmpegKit.execute('-i ${widget.videoPath} -vn -acodec aac -b:a 128k $audioPath');
-      final returnCode = await session.getReturnCode();
-
-      if (ReturnCode.isSuccess(returnCode)) {
-        final audioFile = File(audioPath);
-        final bytes = await audioFile.readAsBytes();
-        
-        // Clean up temp file
-        try { await audioFile.delete(); } catch (_) {}
-        
-        return bytes;
-      } else {
-        debugPrint('FFmpeg failed to extract audio: ${await session.getOutput()}');
-        return null; // Fallback to vision-only if audio fails
-      }
-    } catch (e) {
-      debugPrint('Error in _extractAudio: $e');
-      return null;
-    }
   }
 }

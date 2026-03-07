@@ -190,23 +190,19 @@ Rules:
     required String title,
     required String instructions,
     required List<Uint8List> frames,
-    Uint8List? audioData,
   }) async {
     final url = Uri.parse('$_baseUrl/$_model:generateContent?key=$_apiKey');
 
-    final isMultimodal = !_model.contains('gemma');
     final prompt = '''
 You are the "Dare Guard" AI for DareDay. Your job is to verify if a user's video proof matches the dare they were assigned.
 
 DARE TITLE: $title
 DARE INSTRUCTIONS: $instructions
 
-Examine the provided video frames carefully${isMultimodal ? ' AND the audio track' : ''}.
-${isMultimodal ? 'Examine BOTH carefully:' : 'Examine the images carefully:'}
+Examine the provided video frames carefully.
 1. What do you see in the images?
-${isMultimodal ? '2. What do you hear in the audio? (Check for speech, keyword detection, or specific sounds matching the instructions).' : ''}
-${isMultimodal ? '3.' : '2.'} Determine if the ${isMultimodal ? 'combination of visual and audio evidence' : 'visual evidence'} accurately fulfills the dare.
-${isMultimodal ? '4.' : '3.'} Assign a "relevance_score" from 0 to 100.
+2. Determine if the visual evidence accurately fulfills the dare.
+3. Assign a "relevance_score" from 0 to 100.
 
 Respond ONLY with valid JSON in this exact format:
 {
@@ -219,16 +215,6 @@ Respond ONLY with valid JSON in this exact format:
     final List<Map<String, dynamic>> parts = [
       {'text': prompt}
     ];
-
-    // Add audio if available (Only for non-Gemma models as of current API v1beta)
-    if (audioData != null && !_model.contains('gemma')) {
-      parts.add({
-        'inlineData': {
-          'mimeType': 'audio/aac',
-          'data': base64Encode(audioData),
-        }
-      });
-    }
 
     // Add image frames
     for (final frame in frames) {
