@@ -5,7 +5,7 @@ import '../models/dare_model.dart';
 import '../models/dare_verification_result.dart';
 
 class AiService {
-  static const _apiKey = 'AIzaSyAQgip4g40BuQmwN9Trp6malJfd2KZONw0';
+  static const _apiKey = 'AIzaSyCLqCaYVXlQu7K7r1s2yeLXKJShR7E5gp8';
   static const _model = 'gemma-3-27b-it';
   static const _baseUrl = 'https://generativelanguage.googleapis.com/v1beta/models';
 

@@ -29,14 +29,29 @@ class _DaresScreenState extends State<DaresScreen> {
   List<DareModel> _receivedChallenges = [];
   bool _loadingChallenges = false;
   bool _dailyCompleted = false;
+  UserModel? _userProfile;
 
   @override
   void initState() {
     super.initState();
+    _fetchUserProfile();
     _fetchDailyDare();
     _fetchReceivedChallenges();
     _startTimer();
     _checkStreakReset();
+  }
+
+  Future<void> _fetchUserProfile() async {
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null) return;
+    try {
+      final user = await _supabaseService.fetchProfile(userId);
+      if (mounted) {
+        setState(() => _userProfile = user);
+      }
+    } catch (e) {
+      debugPrint('Error fetching user profile: $e');
+    }
   }
 
   Future<void> _checkStreakReset() async {
@@ -272,15 +287,34 @@ class _DaresScreenState extends State<DaresScreen> {
                           style: const TextStyle(color: Colors.white70, fontSize: 14),
                         ),
                         const SizedBox(height: 16),
-                        ElevatedButton.icon(
-                          onPressed: (_dailyDare == null || _isProcessing || _dailyCompleted) ? null : () => _recordProof(_dailyDare!),
-                          icon: Icon(_dailyCompleted ? Icons.check_circle : Icons.videocam, size: 18),
-                          label: Text(_dailyCompleted ? 'COMPLETED ✅' : 'PROVE IT'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: _dailyCompleted ? Colors.green.withValues(alpha: 0.6) : neonCyan.withValues(alpha: 0.8),
-                            minimumSize: const Size(double.infinity, 44),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                          ),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: ElevatedButton.icon(
+                                onPressed: (_dailyDare == null || _isProcessing || _dailyCompleted) ? null : () => _recordProof(_dailyDare!),
+                                icon: Icon(_dailyCompleted ? Icons.check_circle : Icons.videocam, size: 18),
+                                label: Text(_dailyCompleted ? 'COMPLETED ✅' : 'PROVE IT'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: _dailyCompleted ? Colors.green.withValues(alpha: 0.6) : neonCyan.withValues(alpha: 0.8),
+                                  minimumSize: const Size(0, 44),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                ),
+                              ),
+                            ),
+                            if (!_dailyCompleted) ...[
+                              const SizedBox(width: 12),
+                              OutlinedButton(
+                                onPressed: _isProcessing ? null : () => _skipDaily(context),
+                                style: OutlinedButton.styleFrom(
+                                  minimumSize: const Size(0, 44),
+                                  side: const BorderSide(color: Colors.redAccent, width: 1),
+                                  foregroundColor: Colors.redAccent,
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                ),
+                                child: const Text('SKIP (-50)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                              ),
+                            ],
+                          ],
                         ),
                       ],
                     ),
@@ -578,11 +612,45 @@ class _DaresScreenState extends State<DaresScreen> {
         await _fetchReceivedChallenges();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Forfeited! -100 pts. Now go find them and dare them back!')));
+          _fetchUserProfile();
           Provider.of<NavigationProvider>(context, listen: false).setTab(1); // Go to Search
         }
-      } catch (e) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+    }
+  }
+
+  Future<void> _skipDaily(BuildContext context) async {
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null) return;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF2A1B3D),
+        title: const Text('Skip Daily?'),
+        content: const Text('Skipping will cost you 50 pts and reset your daily progress. Continue?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('CANCEL', style: TextStyle(color: Colors.white54))),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('SKIP (-50)', style: TextStyle(color: Colors.redAccent))),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    setState(() => _isProcessing = true);
+    try {
+      await _supabaseService.updateCoins(userId, -50);
+      setState(() => _dailyCompleted = true); 
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Daily Dare skipped. -50 pts applied.')));
+        _fetchUserProfile();
       }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+    } finally {
+      if (mounted) setState(() => _isProcessing = false);
     }
   }
 
@@ -750,15 +818,10 @@ class _DaresScreenState extends State<DaresScreen> {
   }
 
   Widget _buildStreakProgress() {
-    final userId = Supabase.instance.client.auth.currentUser?.id;
-    if (userId == null) return const SizedBox.shrink();
+    if (_userProfile == null) return const SizedBox(height: 60);
 
-    return FutureBuilder<UserModel>(
-      future: _supabaseService.fetchProfile(userId),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) return const SizedBox(height: 60);
-        final user = snapshot.data!;
-        final progress = user.weeklyProgress;
+    final progress = _userProfile!.weeklyProgress;
+    final streak = _userProfile!.streak;
 
         return Column(
           children: [
@@ -778,22 +841,8 @@ class _DaresScreenState extends State<DaresScreen> {
                 letterSpacing: 1.5,
               ),
             ),
-            if (user.multiplierActive)
-              Padding(
-                padding: const EdgeInsets.only(top: 8.0),
-                child: const Text(
-                  '🔥 2X MULTIPLIER ACTIVE!',
-                  style: TextStyle(
-                    color: Colors.orangeAccent,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-              ),
           ],
         );
-      },
-    );
   }
 
   Widget _buildStreakFire(bool isActive) {

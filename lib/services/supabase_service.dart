@@ -41,8 +41,10 @@ class SupabaseService {
   }
 
   Future<void> updateCoins(String userId, int delta) async {
+    // Fetch fresh profile to avoid stale data
     final profile = await fetchProfile(userId);
-    await _supabase.from('profiles').update({'coins': profile.coins + delta}).eq('id', userId);
+    final newCoins = profile.coins + delta;
+    await _supabase.from('profiles').update({'coins': newCoins}).eq('id', userId);
   }
 
   Future<void> updateGems(String userId, int delta) async {
