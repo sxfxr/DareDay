@@ -194,24 +194,25 @@ Rules:
   }) async {
     final url = Uri.parse('$_baseUrl/$_model:generateContent?key=$_apiKey');
 
+    final isMultimodal = !_model.contains('gemma');
     final prompt = '''
 You are the "Dare Guard" AI for DareDay. Your job is to verify if a user's video proof matches the dare they were assigned.
 
 DARE TITLE: $title
 DARE INSTRUCTIONS: $instructions
 
-I have provided both visual frames from the video AND the audio track.
-Examine BOTH carefully:
+Examine the provided video frames carefully${isMultimodal ? ' AND the audio track' : ''}.
+${isMultimodal ? 'Examine BOTH carefully:' : 'Examine the images carefully:'}
 1. What do you see in the images?
-2. What do you hear in the audio? (Check for speech, keyword detection, or specific sounds matching the instructions).
-3. Determine if the combination of visual and audio evidence accurately fulfills the dare.
-4. Assign a "relevance_score" from 0 to 100.
+${isMultimodal ? '2. What do you hear in the audio? (Check for speech, keyword detection, or specific sounds matching the instructions).' : ''}
+${isMultimodal ? '3.' : '2.'} Determine if the ${isMultimodal ? 'combination of visual and audio evidence' : 'visual evidence'} accurately fulfills the dare.
+${isMultimodal ? '4.' : '3.'} Assign a "relevance_score" from 0 to 100.
 
 Respond ONLY with valid JSON in this exact format:
 {
-  "description": "A detailed 1-sentence description of the video and audio content.",
+  "description": "A detailed 1-sentence description of the content.",
   "relevance_score": 85,
-  "reasoning": "Explain your score based on both visual and audio evidence."
+  "reasoning": "Explain your score based on the evidence."
 }
 ''';
 
@@ -219,8 +220,8 @@ Respond ONLY with valid JSON in this exact format:
       {'text': prompt}
     ];
 
-    // Add audio if available
-    if (audioData != null) {
+    // Add audio if available (Only for non-Gemma models as of current API v1beta)
+    if (audioData != null && !_model.contains('gemma')) {
       parts.add({
         'inlineData': {
           'mimeType': 'audio/aac',
