@@ -2,6 +2,7 @@ class UserModel {
   final String id;
   final String username;
   final String? bio;
+  final String? avatarUrl;
   final List<String>? interests;
   final int coins;
   final int gems;
@@ -19,8 +20,9 @@ class UserModel {
     required this.id,
     required this.username,
     this.bio,
+    this.avatarUrl,
     this.interests,
-    this.coins = 1000,
+    this.coins = 0,
     this.gems = 0,
     this.streak = 0,
     this.skipTokens = 0,
@@ -45,8 +47,9 @@ class UserModel {
       id: json['id'] as String,
       username: json['username'] as String,
       bio: json['bio'] as String?,
+      avatarUrl: json['avatar_url'] as String?,
       interests: (json['interests'] as List<dynamic>?)?.map((e) => e as String).toList(),
-      coins: json['coins'] as int? ?? 1000,
+      coins: json['coins'] as int? ?? 0,
       gems: json['gems'] as int? ?? 0,
       streak: json['streak'] as int? ?? 0,
       skipTokens: json['skip_tokens'] as int? ?? 0,
@@ -65,6 +68,7 @@ class UserModel {
       'id': id,
       'username': username,
       'bio': bio,
+      'avatar_url': avatarUrl,
       'interests': interests,
       'coins': coins,
       'gems': gems,

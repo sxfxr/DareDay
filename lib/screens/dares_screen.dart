@@ -150,6 +150,30 @@ class _DaresScreenState extends State<DaresScreen> {
         title: const Text('DARES', style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1.5)),
         centerTitle: true,
         actions: [
+          if (_userProfile != null)
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.only(right: 8.0),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: neonCyan.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: neonCyan.withOpacity(0.2)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.stars_rounded, color: neonCyan, size: 14),
+                      const SizedBox(width: 4),
+                      Text(
+                        '${_userProfile!.coins}',
+                        style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           IconButton(
             icon: const Icon(Icons.leaderboard_outlined, color: Colors.white70),
             onPressed: () {
@@ -167,49 +191,61 @@ class _DaresScreenState extends State<DaresScreen> {
         builder: (context, navProvider, child) {
           final grindDare = navProvider.activeGrindDare;
 
-          return SingleChildScrollView(
-            padding: const EdgeInsets.all(20.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Timer
-                Center(
-                  child: Text(
-                    '${_timeLeft.inHours.toString().padLeft(2, "0")}:${(_timeLeft.inMinutes % 60).toString().padLeft(2, "0")}:${(_timeLeft.inSeconds % 60).toString().padLeft(2, "0")}',
-                    style: const TextStyle(
-                      color: neonCyan, 
-                      fontSize: 32, 
-                      fontWeight: FontWeight.w900, 
-                      shadows: [Shadow(color: neonCyan, blurRadius: 10)]
+          return RefreshIndicator(
+            onRefresh: () async {
+              await Future.wait([
+                _fetchUserProfile(),
+                _fetchDailyDare(),
+                _fetchReceivedChallenges(),
+              ]);
+            },
+            color: neonCyan,
+            backgroundColor: const Color(0xFF191022),
+            child: SingleChildScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.all(20.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Timer
+                  Center(
+                    child: Text(
+                      '${_timeLeft.inHours.toString().padLeft(2, "0")}:${(_timeLeft.inMinutes % 60).toString().padLeft(2, "0")}:${(_timeLeft.inSeconds % 60).toString().padLeft(2, "0")}',
+                      style: const TextStyle(
+                        color: neonCyan, 
+                        fontSize: 32, 
+                        fontWeight: FontWeight.w900, 
+                        shadows: [Shadow(color: neonCyan, blurRadius: 10)]
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 24),
-                
-                // Streak Progress
-                _buildStreakProgress(),
-                
-                const SizedBox(height: 32),
+                  const SizedBox(height: 24),
+                  
+                  // Streak Progress
+                  _buildStreakProgress(),
+                  
+                  const SizedBox(height: 32),
 
-                // SECTION: DAILY DARE
-                _buildSectionHeader('DAILY DARE', Icons.calendar_today, neonCyan),
-                const SizedBox(height: 12),
-                _buildDailySection(context, primaryColor, neonCyan),
+                  // SECTION: DAILY DARE
+                  _buildSectionHeader('DAILY DARE', Icons.calendar_today, neonCyan),
+                  const SizedBox(height: 12),
+                  _buildDailySection(context, primaryColor, neonCyan),
 
-                const SizedBox(height: 32),
+                  const SizedBox(height: 32),
 
-                // SECTION: CHALLENGES (Sent by friends)
-                _buildSectionHeader('CHALLENGES', Icons.shield, Colors.pinkAccent), 
-                const SizedBox(height: 12),
-                _buildChallengesSection(context, navProvider, primaryColor, neonCyan),
+                  // SECTION: CHALLENGES (Sent by friends)
+                  _buildSectionHeader('CHALLENGES', Icons.shield, Colors.pinkAccent), 
+                  const SizedBox(height: 12),
+                  _buildChallengesSection(context, navProvider, primaryColor, neonCyan),
 
-                const SizedBox(height: 32),
+                  const SizedBox(height: 32),
 
-                // SECTION: GRIND (AI)
-                _buildSectionHeader('GRIND', Icons.bolt, primaryColor),
-                const SizedBox(height: 12),
-                _buildGrindSection(context, grindDare, navProvider, primaryColor, neonCyan),
-              ],
+                  // SECTION: GRIND (AI)
+                  _buildSectionHeader('GRIND', Icons.bolt, primaryColor),
+                  const SizedBox(height: 12),
+                  _buildGrindSection(context, grindDare, navProvider, primaryColor, neonCyan),
+                ],
+              ),
             ),
           );
         },
@@ -594,6 +630,7 @@ class _DaresScreenState extends State<DaresScreen> {
       }
       await _supabaseService.updateChallengeStatus(dare.id, 'rejected'); 
       await _fetchReceivedChallenges();
+      await _fetchUserProfile();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(skipDeduction ? 'Challenge cleared via Ad!' : 'Challenge forfeited. -100 pts applied.')
@@ -615,43 +652,181 @@ class _DaresScreenState extends State<DaresScreen> {
           _fetchUserProfile();
           Provider.of<NavigationProvider>(context, listen: false).setTab(1); // Go to Search
         }
-    } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+      } catch (e) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+      }
     }
   }
 
   Future<void> _skipDaily(BuildContext context) async {
     final userId = Supabase.instance.client.auth.currentUser?.id;
-    if (userId == null) return;
+    if (userId == null || _userProfile == null) return;
 
-    final confirm = await showDialog<bool>(
+    final result = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF2A1B3D),
-        title: const Text('Skip Daily?'),
-        content: const Text('Skipping will cost you 50 pts and reset your daily progress. Continue?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('CANCEL', style: TextStyle(color: Colors.white54))),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('SKIP (-50)', style: TextStyle(color: Colors.redAccent))),
-        ],
+        backgroundColor: const Color(0xFF191022),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: const BorderSide(color: Colors.white10)),
+        title: const Text('Skip Daily?', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Choose your skip method:', style: TextStyle(color: Colors.white70, fontSize: 13)),
+            const SizedBox(height: 20),
+            _buildDialogOption(
+              title: 'SKIP (-50 Pts)',
+              subtitle: 'Resets daily progress & streak',
+              icon: Icons.history_rounded,
+              color: Colors.redAccent,
+              onTap: () => Navigator.pop(context, 'pts'),
+            ),
+            const SizedBox(height: 12),
+            _buildDialogOption(
+              title: 'USE SKIP TOKEN',
+              subtitle: 'Preserves your progress & streak',
+              icon: Icons.electric_bolt_rounded,
+              color: const Color(0xFFFFD700),
+              trailing: Text('(${_userProfile!.skipTokens})', style: const TextStyle(color: Colors.white38, fontSize: 12)),
+              onTap: () => Navigator.pop(context, 'token'),
+            ),
+          ],
+        ),
       ),
     );
 
-    if (confirm != true) return;
+    if (result == null) return;
 
+    if (result == 'pts') {
+      setState(() => _isProcessing = true);
+      try {
+        final dailyDare = _dailyDare;
+        if (dailyDare == null) return;
+        await _supabaseService.recordDailySkip(userId, dailyDare.id);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Daily Dare skipped. -50 pts applied.')));
+          await _fetchUserProfile();
+          await _fetchDailyDare();
+        }
+      } catch (e) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+      } finally {
+        if (mounted) setState(() => _isProcessing = false);
+      }
+    } else if (result == 'token') {
+      if (_userProfile!.skipTokens > 0) {
+        await _executeTokenSkip(userId);
+      } else {
+        // No tokens, check gems (5 gems = 1 token)
+        if (_userProfile!.gems >= 5) {
+          final buyConfirm = await _showBuyAndUseDialog();
+          if (buyConfirm == true) {
+            setState(() => _isProcessing = true);
+            try {
+              await _supabaseService.buySkipToken(userId);
+              await _executeTokenSkip(userId);
+            } catch (e) {
+              if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Purchase failed: $e')));
+            } finally {
+              if (mounted) setState(() => _isProcessing = false);
+            }
+          }
+        } else {
+          // Not enough gems either
+          _showInsufficientGemsDialog();
+        }
+      }
+    }
+  }
+
+  Future<void> _executeTokenSkip(String userId) async {
     setState(() => _isProcessing = true);
     try {
-      await _supabaseService.updateCoins(userId, -50);
-      setState(() => _dailyCompleted = true); 
+      final dailyDare = _dailyDare;
+      if (dailyDare == null) return;
+      await _supabaseService.useSkipToken(userId, dailyDare.id);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Daily Dare skipped. -50 pts applied.')));
-        _fetchUserProfile();
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Skip Token used! Progress preserved. ✨')));
+        await _fetchUserProfile();
+        await _fetchDailyDare();
       }
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
     } finally {
       if (mounted) setState(() => _isProcessing = false);
     }
+  }
+
+  void _showInsufficientGemsDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF191022),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: const BorderSide(color: Colors.white10)),
+        title: const Text('Not Enough Gems', style: TextStyle(color: Colors.white)),
+        content: const Text('You need 5 Gems to buy a skip token. Visit the gem store to get more!', style: TextStyle(color: Colors.white70)),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              Provider.of<NavigationProvider>(context, listen: false).setTab(4); // Go to Profile
+            },
+            child: const Text('GO TO STORE', style: TextStyle(color: Color(0xFFA855F7), fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<bool?> _showBuyAndUseDialog() {
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF191022),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Buy & Use Token?', style: TextStyle(color: Colors.white)),
+        content: const Text('You have 0 skip tokens. Buy one for 5 Gems and use it now?', style: TextStyle(color: Colors.white70)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('CANCEL', style: TextStyle(color: Colors.white54))),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('BUY & USE (5💎)', style: TextStyle(color: Color(0xFFA855F7)))),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDialogOption({required String title, required String subtitle, required IconData icon, required Color color, required VoidCallback onTap, Widget? trailing}) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.05),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
+              child: Icon(icon, color: color, size: 20),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                  Text(subtitle, style: const TextStyle(color: Colors.white38, fontSize: 10)),
+                ],
+              ),
+            ),
+            if (trailing != null) trailing,
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _updateChallengeStatus(String id, String status) async {
@@ -716,6 +891,7 @@ class _DaresScreenState extends State<DaresScreen> {
         )));
 
         if (result == true && mounted) {
+          _fetchUserProfile();
           _fetchDailyDare();
           _fetchReceivedChallenges();
           
@@ -772,6 +948,7 @@ class _DaresScreenState extends State<DaresScreen> {
         await _supabaseService.updateCoins(userId, -5);
       }
       navProvider.clearGrindDare();
+      await _fetchUserProfile();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(skipDeduction ? 'Dare cleared via Ad!' : 'Dare forfeited. -5 pts applied.')

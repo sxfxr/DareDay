@@ -56,6 +56,19 @@ class DareModel {
       'created_at': createdAt.toIso8601String(),
     };
   }
+
+  /// Only includes fields that exist in 'dares_master' table
+  Map<String, dynamic> toMasterJson() {
+    return {
+      'id': id,
+      'title': title,
+      'instructions': instructions,
+      'difficulty': ['Easy', 'Medium', 'Hard', 'Insane'].contains(difficulty) ? difficulty : 'Easy',
+      'category': category,
+      'xp_reward': xpReward,
+      'created_at': createdAt.toUtc().toIso8601String(),
+    };
+  }
 }
 
 class UserAttemptModel {

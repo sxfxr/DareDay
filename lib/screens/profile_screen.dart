@@ -1,10 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import 'dart:io';
+import 'dart:ui';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/supabase_service.dart';
+import '../services/ai_service.dart';
 import '../models/user_model.dart';
 import '../models/dare_model.dart';
 import 'package:video_player/video_player.dart';
 import 'package:chewie/chewie.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 class ProfileScreen extends StatefulWidget {
   final String? userId;
@@ -18,252 +23,491 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final SupabaseService _supabaseService = SupabaseService();
   late Future<UserModel> _profileFuture;
   late String _currentViewedId;
+  final ImagePicker _picker = ImagePicker();
+  bool _isFollowing = false;
+  bool _isFollowLoading = false;
 
   @override
   void initState() {
     super.initState();
     _currentViewedId = widget.userId ?? Supabase.instance.client.auth.currentUser!.id;
     _profileFuture = _supabaseService.fetchProfile(_currentViewedId);
+    _checkInitialFollowStatus();
+  }
+
+  Future<void> _checkInitialFollowStatus() async {
+    final myId = Supabase.instance.client.auth.currentUser?.id;
+    if (myId != null && myId != _currentViewedId) {
+      final isFollowing = await _supabaseService.checkFollowStatus(myId, _currentViewedId);
+      if (mounted) setState(() => _isFollowing = isFollowing);
+    }
+  }
+
+  Future<void> _pickImage() async {
+    final XFile? image = await _picker.pickImage(source: ImageSource.gallery, imageQuality: 50);
+    if (image != null) {
+      try {
+        await _supabaseService.uploadProfilePicture(_currentViewedId, File(image.path));
+        setState(() {
+          _profileFuture = _supabaseService.fetchProfile(_currentViewedId);
+        });
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profile picture updated! ✨')));
+      } catch (e) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Upload failed: $e')));
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    const primaryColor = Color(0xFFA855F7);
-    const accentCyan = Color(0xFF06B6D4);
-    const backgroundDark = Color(0xFF191022);
+    const primaryPurple = Color(0xFFA855F7);
+    const accentCyan = Color(0xFF22D3EE);
+    const backgroundDark = Color(0xFF0F0814);
+    const goldMetallic = Color(0xFFFFD700);
 
     final myId = Supabase.instance.client.auth.currentUser?.id;
     final isOwnProfile = myId == _currentViewedId;
 
     return Scaffold(
       backgroundColor: backgroundDark,
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
         leading: !isOwnProfile ? IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 20),
           onPressed: () => Navigator.pop(context),
         ) : null,
         actions: isOwnProfile ? [
           IconButton(
-            icon: const Icon(Icons.menu, color: Colors.white),
+            icon: const Icon(Icons.menu_rounded, color: Colors.white, size: 28),
             onPressed: () => _showSettingsMenu(context),
           ),
+          const SizedBox(width: 8),
         ] : null,
       ),
-      body: FutureBuilder<UserModel>(
-        future: _profileFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.hasError) {
-            return Center(child: Text('Error: ${snapshot.error}', style: const TextStyle(color: Colors.white)));
-          }
-          final user = snapshot.data!;
+      body: Stack(
+        children: [
+          // Background Gradient Blobs
+          Positioned(
+            top: -100,
+            right: -50,
+            child: Container(
+              width: 300,
+              height: 300,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: primaryPurple.withValues(alpha: 0.15),
+              ),
+              child: BackdropFilter(filter: ImageFilter.blur(sigmaX: 80, sigmaY: 80), child: Container()),
+            ),
+          ),
+          Positioned(
+            bottom: 100,
+            left: -50,
+            child: Container(
+              width: 250,
+              height: 250,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: accentCyan.withValues(alpha: 0.1),
+              ),
+              child: BackdropFilter(filter: ImageFilter.blur(sigmaX: 80, sigmaY: 80), child: Container()),
+            ),
+          ),
 
-          return FutureBuilder<Map<String, int>>(
-            future: _supabaseService.fetchSocialCounts(user.id),
-            builder: (context, socialSnapshot) {
-              final stats = socialSnapshot.data ?? {'followers': 0, 'following': 0};
+          FutureBuilder<UserModel>(
+            future: _profileFuture,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator(color: primaryPurple));
+              }
+              if (snapshot.hasError) {
+                return Center(child: Text('Error: ${snapshot.error}', style: const TextStyle(color: Colors.white)));
+              }
+              final user = snapshot.data!;
 
-              return SingleChildScrollView(
-                child: Column(
-                  children: [
-                    const SizedBox(height: 64),
-                    // Avatar Section
-                    Center(
-                      child: Container(
-                        width: 112,
-                        height: 112,
-                        decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: primaryColor, width: 2)),
-                        child: const CircleAvatar(backgroundColor: Colors.white10, child: Icon(Icons.person, size: 64, color: Colors.white38)),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          user.username,
-                          style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
-                        ),
-                        if (isOwnProfile)
-                          IconButton(
-                            icon: const Icon(Icons.edit, color: Colors.white54, size: 20),
-                            onPressed: () => _showEditProfileSheet(user),
-                          ),
-                      ],
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: _getRankColor(user.rankStatus).withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: _getRankColor(user.rankStatus).withValues(alpha: 0.5), width: 1),
-                      ),
-                      child: Text(
-                        user.rankStatus,
-                        style: TextStyle(
-                          color: _getRankColor(user.rankStatus),
-                          fontSize: 10,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 1.2,
-                        ),
-                      ),
-                    ),
-                    if (user.bio != null)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 32),
-                        child: Text(
-                          user.bio!,
-                          style: const TextStyle(color: Colors.white54, fontSize: 14),
-                          textAlign: TextAlign.center,
-                        ),
-                      ),
-                    if (user.lastActive != null)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8.0),
-                        child: Text(
-                          'Last active: ${_formatLastActive(user.lastActive!)}',
-                          style: const TextStyle(color: Colors.white24, fontSize: 11, fontWeight: FontWeight.w500),
-                        ),
-                      ),
-                    const SizedBox(height: 24),
+              return FutureBuilder<Map<String, int>>(
+                future: _supabaseService.fetchSocialCounts(user.id),
+                builder: (context, socialSnapshot) {
+                  final stats = socialSnapshot.data ?? {'followers': 0, 'following': 0};
 
-                    // Social counts
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        _buildSocialStat('${stats['followers']}', 'Followers', () {}),
-                        const SizedBox(width: 32),
-                        _buildSocialStat('${stats['following']}', 'Following', () => _showFollowingList(user.id)),
-                      ],
-                    ),
-                    const SizedBox(height: 32),
-
-                    // Stats Grid
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Row(
+                  return RefreshIndicator(
+                    onRefresh: () async {
+                      setState(() {
+                        _profileFuture = _supabaseService.fetchProfile(_currentViewedId);
+                      });
+                    },
+                    color: primaryPurple,
+                    backgroundColor: backgroundDark,
+                    child: SingleChildScrollView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      child: Column(
                         children: [
-                          Expanded(child: _buildStatBox(context, 'STREAK', '${user.streak} 🔥', primaryColor)),
-                          const SizedBox(width: 8),
-                          Expanded(child: _buildStatBox(context, 'pts', '${user.coins}', accentCyan)),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: GestureDetector(
-                              onTap: isOwnProfile ? () => _showGemsShop(user.id) : null,
-                              child: _buildStatBox(context, 'GEMS', '${user.gems} 💎', Colors.pinkAccent),
+                          const SizedBox(height: 120),
+                          // Avatar Section
+                          Center(
+                            child: Stack(
+                              alignment: Alignment.bottomRight,
+                              children: [
+                                GestureDetector(
+                                  onTap: isOwnProfile ? _pickImage : null,
+                                  child: Container(
+                                    width: 128,
+                                    height: 128,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      border: Border.all(color: Colors.white10, width: 2),
+                                      boxShadow: [
+                                        BoxShadow(color: primaryPurple.withValues(alpha: 0.3), blurRadius: 30, spreadRadius: -5)
+                                      ],
+                                      image: DecorationImage(
+                                        image: NetworkImage(user.avatarUrl ?? 'https://api.dicebear.com/7.x/avataaars/png?seed=${user.username}&backgroundColor=b6e3f4,c0aede,d1d4f9'), 
+                                        fit: BoxFit.cover,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                if (isOwnProfile)
+                                  Container(
+                                    padding: const EdgeInsets.all(8),
+                                    decoration: const BoxDecoration(color: primaryPurple, shape: BoxShape.circle),
+                                    child: const Icon(Icons.camera_alt_rounded, size: 16, color: Colors.white),
+                                  ),
+                              ],
                             ),
                           ),
-                          const SizedBox(width: 8),
-                          Expanded(child: _buildStatBox(context, 'SKIPS', '${user.skipTokens} ⚡', const Color(0xFFFFD700))),
+                          const SizedBox(height: 20),
+                          
+                          // Username & Badge
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                user.username,
+                                style: GoogleFonts.inter(
+                                  color: Colors.white,
+                                  fontSize: 28,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: -0.5,
+                                ),
+                              ),
+                              if (isOwnProfile) ...[
+                                const SizedBox(width: 4),
+                                InkWell(
+                                  onTap: () => _showEditProfileSheet(user),
+                                  child: const Icon(Icons.edit_rounded, color: Colors.white38, size: 18),
+                                ),
+                              ],
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          
+                          // Glowing metallic badge
+                          _buildGlowingBadge(user.rankStatus),
+                          
+                          if (user.bio != null && user.bio!.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 12),
+                              child: Text(
+                                user.bio!,
+                                style: GoogleFonts.inter(color: Colors.white60, fontSize: 15, height: 1.4),
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
+                          
+                          const SizedBox(height: 24),
+
+                          // Social stats
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              _buildSocialStat('${stats['followers']}', 'Followers', () => _showFollowersList(user.id)),
+                              Container(width: 1, height: 24, color: Colors.white10, margin: const EdgeInsets.symmetric(horizontal: 24)),
+                              _buildSocialStat('${stats['following']}', 'Following', () => _showFollowingList(user.id)),
+                            ],
+                          ),
+                          
+                          if (!isOwnProfile) ...[
+                            const SizedBox(height: 16),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 40),
+                              child: _isFollowLoading 
+                                ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: accentCyan))
+                                : GestureDetector(
+                                    onTap: _toggleFollow,
+                                    child: Container(
+                                      width: double.infinity,
+                                      padding: const EdgeInsets.symmetric(vertical: 10),
+                                      decoration: BoxDecoration(
+                                        color: _isFollowing ? Colors.white.withValues(alpha: 0.05) : accentCyan,
+                                        borderRadius: BorderRadius.circular(12),
+                                        border: _isFollowing ? Border.all(color: Colors.white10) : null,
+                                      ),
+                                      child: Center(
+                                        child: Text(
+                                          _isFollowing ? 'UNFOLLOW' : 'FOLLOW',
+                                          style: GoogleFonts.inter(
+                                            color: _isFollowing ? Colors.white70 : backgroundDark,
+                                            fontWeight: FontWeight.w900,
+                                            fontSize: 12,
+                                            letterSpacing: 1,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                            ),
+                          ],
+                          
+                          const SizedBox(height: 40),
+
+                          // Stats Grid
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 20),
+                            child: GridView.count(
+                              crossAxisCount: 2,
+                              shrinkWrap: true,
+                              physics: const NeverScrollableScrollPhysics(),
+                              mainAxisSpacing: 16,
+                              crossAxisSpacing: 16,
+                              childAspectRatio: 1.5,
+                              children: [
+                                _buildTactileStatCard('STREAK', '${user.streak} 🔥', primaryPurple, Icons.bolt_rounded),
+                                _buildTactileStatCard('TOTAL PTS', '${user.coins}', accentCyan, Icons.stars_rounded),
+                                _buildTactileStatCard('GEMS', '${user.gems}', Colors.pinkAccent, Icons.diamond_rounded, onTap: isOwnProfile ? () => _showGemsShop(user.id) : null),
+                                _buildTactileStatCard('SKIPS', '${user.skipTokens}', goldMetallic, Icons.electric_bolt_rounded),
+                              ],
+                            ),
+                          ),
+                          
+                          const SizedBox(height: 40),
+                          
+                          if (isOwnProfile) ...[
+                            // Gradient Pill Button
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 20),
+                              child: _buildGradientPillButton(
+                                label: 'BUY SKIP TOKEN',
+                                subtitle: '5 Gems each',
+                                icon: Icons.bolt_rounded,
+                                onTap: () => _buySkipTokens(user.id),
+                              ),
+                            ),
+                            const SizedBox(height: 32),
+                            // De-emphasized Sign Out
+                            TextButton(
+                              onPressed: () => Supabase.instance.client.auth.signOut(),
+                              child: Text('SIGN OUT', style: GoogleFonts.inter(color: Colors.white24, fontWeight: FontWeight.bold, fontSize: 13, letterSpacing: 1.5)),
+                            ),
+                          ] else ...[
+                            // Actions for others
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 20),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: _buildSecondaryButton('MESSAGE', Icons.chat_bubble_outline_rounded, () {
+                                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Messaging coming soon! 💬')));
+                                    }),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  FutureBuilder<bool>(
+                                    future: _supabaseService.isMutualFollow(myId!, _currentViewedId),
+                                    builder: (context, mutualSnapshot) {
+                                      final isMutual = mutualSnapshot.data ?? false;
+                                      if (!isMutual) return const SizedBox.shrink();
+                                      return Expanded(
+                                        child: _buildGradientPillButton(
+                                          label: 'DARE',
+                                          icon: Icons.bolt_rounded,
+                                          onTap: () => _showSendDareSheet(user),
+                                          small: true,
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+
+                          const SizedBox(height: 48),
+
+                          // Memories Section
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(24),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.03),
+                              borderRadius: const BorderRadius.vertical(top: Radius.circular(40)),
+                              border: const Border(top: BorderSide(color: Colors.white10, width: 1)),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text('MEMORIES', style: GoogleFonts.inter(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w900, letterSpacing: 2)),
+                                    const Icon(Icons.grid_view_rounded, color: Colors.white38, size: 20),
+                                  ],
+                                ),
+                                const SizedBox(height: 24),
+                                ProfileMemories(userId: user.id, isOwnProfile: isOwnProfile),
+                              ],
+                            ),
+                          ),
                         ],
                       ),
                     ),
-                    const SizedBox(height: 24),
-                    if (isOwnProfile) ...[
-                      // Buy Tokens
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: ElevatedButton(
-                          onPressed: () => _buySkipTokens(user.id),
-                          style: ElevatedButton.styleFrom(
-                            minimumSize: const Size(double.infinity, 56),
-                            backgroundColor: Colors.pinkAccent,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                          ),
-                          child: const Text('Buy Skip Token (5 Gems)', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      // Sign Out
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: OutlinedButton.icon(
-                          onPressed: () async {
-                            await Supabase.instance.client.auth.signOut();
-                          },
-                          icon: const Icon(Icons.logout, size: 20),
-                          label: const Text('SIGN OUT'),
-                          style: OutlinedButton.styleFrom(
-                            minimumSize: const Size(double.infinity, 56),
-                            side: BorderSide(color: Colors.redAccent.withOpacity(0.5)),
-                            foregroundColor: Colors.redAccent,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 32),
-                    ] else ...[
-                      // Actions for others' profiles
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: ElevatedButton.icon(
-                                onPressed: () {
-                                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Messaging coming soon! 💬')));
-                                },
-                                icon: const Icon(Icons.chat_bubble_outline, size: 20),
-                                label: const Text('MESSAGE'),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: primaryColor,
-                                  foregroundColor: Colors.white,
-                                  minimumSize: const Size(0, 56),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            FutureBuilder<bool>(
-                              future: _supabaseService.isMutualFollow(myId!, _currentViewedId),
-                              builder: (context, mutualSnapshot) {
-                                final isMutual = mutualSnapshot.data ?? false;
-                                if (!isMutual) return const SizedBox.shrink();
-                                return Expanded(
-                                  child: ElevatedButton.icon(
-                                    onPressed: () => _showSendDareSheet(user),
-                                    icon: const Icon(Icons.bolt, size: 20),
-                                    label: const Text('DARE'),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.pinkAccent,
-                                      foregroundColor: Colors.white,
-                                      minimumSize: const Size(0, 56),
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                                    ),
-                                  ),
-                                );
-                              },
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 32),
-                    ],
-
-                    // Memories Section
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: const Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          'MEMORIES',
-                          style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold, letterSpacing: 1.2),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    ProfileMemories(userId: user.id, isOwnProfile: isOwnProfile),
-                    const SizedBox(height: 32),
-                  ],
-                ),
+                  );
+                },
               );
             },
-          );
-        },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _toggleFollow() async {
+    final myId = Supabase.instance.client.auth.currentUser?.id;
+    if (myId == null) return;
+
+    setState(() => _isFollowLoading = true);
+    try {
+      if (_isFollowing) {
+        await _supabaseService.unfollowUser(myId, _currentViewedId);
+      } else {
+        await _supabaseService.followUser(myId, _currentViewedId);
+      }
+      if (mounted) {
+        setState(() {
+          _isFollowing = !_isFollowing;
+          _isFollowLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+        setState(() => _isFollowLoading = false);
+      }
+    }
+  }
+
+  Widget _buildGlowingBadge(String rank) {
+    Color rankColor = _getRankColor(rank);
+    bool isDaredevil = rank == 'DAREDEVIL';
+    
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      decoration: BoxDecoration(
+        color: isDaredevil ? Colors.amber.withValues(alpha: 0.1) : rankColor.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(30),
+        border: Border.all(color: isDaredevil ? Colors.amber.withValues(alpha: 0.5) : rankColor.withValues(alpha: 0.3), width: 1.5),
+        boxShadow: [
+          if (isDaredevil)
+            BoxShadow(color: Colors.amber.withValues(alpha: 0.2), blurRadius: 15, spreadRadius: 0)
+        ],
+      ),
+      child: Text(
+        rank,
+        style: GoogleFonts.inter(
+          color: isDaredevil ? const Color(0xFFFFD700) : rankColor,
+          fontSize: 11,
+          fontWeight: FontWeight.w900,
+          letterSpacing: 1.5,
+          shadows: isDaredevil ? [const Shadow(color: Colors.amber, blurRadius: 10)] : null,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTactileStatCard(String label, String value, Color color, IconData icon, {VoidCallback? onTap}) {
+    return GestureDetector(
+      onTap: onTap,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(24),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.05),
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: Colors.white10),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Icon(icon, color: color, size: 24),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(value, style: GoogleFonts.inter(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w800)),
+                    Text(label, style: GoogleFonts.inter(color: Colors.white38, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1)),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGradientPillButton({required String label, String? subtitle, required IconData icon, required VoidCallback onTap, bool small = false}) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: EdgeInsets.symmetric(vertical: small ? 16 : 20, horizontal: 24),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(colors: [Color(0xFFEC4899), Color(0xFFA855F7)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+          borderRadius: BorderRadius.circular(small ? 20 : 24),
+          boxShadow: [
+            BoxShadow(color: const Color(0xFFA855F7).withValues(alpha: 0.3), blurRadius: 20, offset: const Offset(0, 10))
+          ],
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: Colors.white, size: small ? 20 : 24),
+            const SizedBox(width: 12),
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label, style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.w900, fontSize: small ? 14 : 16, letterSpacing: 1)),
+                if (subtitle != null)
+                  Text(subtitle, style: GoogleFonts.inter(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.bold)),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSecondaryButton(String label, IconData icon, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 20),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.05),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: Colors.white10),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: Colors.white, size: 20),
+            const SizedBox(width: 12),
+            Text(label, style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 14, letterSpacing: 1)),
+          ],
+        ),
       ),
     );
   }
@@ -271,73 +515,109 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void _showSendDareSheet(UserModel targetUser) {
     final titleController = TextEditingController();
     final instrController = TextEditingController();
+    final aiService = AiService();
+    bool isVerifying = false;
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: const Color(0xFF191022),
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      builder: (ctx) => Padding(
-        padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom, left: 24, right: 24, top: 24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('DARE ${targetUser.username.toUpperCase()}', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 24),
-            TextField(
-              controller: titleController,
-              style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(
-                hintText: 'Dare Title',
-                hintStyle: const TextStyle(color: Colors.white24),
-                filled: true,
-                fillColor: Colors.white.withValues(alpha: 0.05),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setSheetState) => Padding(
+          padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom, left: 24, right: 24, top: 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('DARE ${targetUser.username.toUpperCase()}', style: GoogleFonts.inter(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                  const Icon(Icons.auto_awesome, color: Color(0xFFA855F7), size: 20),
+                ],
               ),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: instrController,
-              maxLines: 3,
-              style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(
-                hintText: 'Instructions...',
-                hintStyle: const TextStyle(color: Colors.white24),
-                filled: true,
-                fillColor: Colors.white.withValues(alpha: 0.05),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+              const SizedBox(height: 8),
+              Text('Custom dares are checked by AI for safety.', style: GoogleFonts.inter(color: Colors.white38, fontSize: 11)),
+              const SizedBox(height: 24),
+              TextField(
+                controller: titleController,
+                style: const TextStyle(color: Colors.white),
+                decoration: _inputDecoration('Dare Title', Icons.title_rounded),
               ),
-            ),
-            const SizedBox(height: 24),
-            ElevatedButton(
-              onPressed: () async {
-                final myId = Supabase.instance.client.auth.currentUser?.id;
-                if (myId == null) return;
-                try {
-                  await _supabaseService.sendChallenge(
-                    senderId: myId,
-                    recipientId: targetUser.id,
-                    title: titleController.text.trim(),
-                    instructions: instrController.text.trim(),
-                  );
-                  if (mounted) {
-                    Navigator.pop(context);
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Dare sent! 🔥')));
-                  }
-                } catch (e) {
-                  if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
-                }
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.pinkAccent,
-                minimumSize: const Size(double.infinity, 48),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              const SizedBox(height: 16),
+              TextField(
+                controller: instrController,
+                maxLines: 3,
+                style: const TextStyle(color: Colors.white),
+                decoration: _inputDecoration('Instructions...', Icons.description_rounded),
               ),
-              child: const Text('SEND DARE', style: TextStyle(fontWeight: FontWeight.bold)),
-            ),
-            const SizedBox(height: 32),
-          ],
+              const SizedBox(height: 24),
+              if (isVerifying)
+                const Center(child: Padding(
+                  padding: EdgeInsets.symmetric(vertical: 20),
+                  child: Column(
+                    children: [
+                      CircularProgressIndicator(color: Color(0xFFA855F7)),
+                      SizedBox(height: 12),
+                      Text('Gemma is verifying your dare...', style: TextStyle(color: Colors.white38, fontSize: 12)),
+                    ],
+                  ),
+                ))
+              else
+                _buildGradientPillButton(
+                  label: 'SEND DARE',
+                  icon: Icons.send_rounded,
+                  onTap: () async {
+                    final title = titleController.text.trim();
+                    final instr = instrController.text.trim();
+                    
+                    if (title.isEmpty || instr.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please fill all fields')));
+                      return;
+                    }
+
+                    setSheetState(() => isVerifying = true);
+                    
+                    try {
+                      final myId = Supabase.instance.client.auth.currentUser?.id;
+                      if (myId == null) return;
+
+                      // 1. AI Verification
+                      final verification = await aiService.verifyCustomDare(title, instr);
+                      
+                      if (!verification['is_safe']) {
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                            content: Text('AI Blocked: ${verification['reason']}'),
+                            backgroundColor: Colors.redAccent,
+                          ));
+                        }
+                        setSheetState(() => isVerifying = false);
+                        return;
+                      }
+
+                      // 2. Send Challenge
+                      await _supabaseService.sendChallenge(
+                        senderId: myId,
+                        recipientId: targetUser.id,
+                        title: title,
+                        instructions: instr,
+                      );
+
+                      if (mounted) {
+                        Navigator.pop(ctx);
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Dare sent! 🔥')));
+                      }
+                    } catch (e) {
+                      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                      setSheetState(() => isVerifying = false);
+                    }
+                  },
+                ),
+              const SizedBox(height: 32),
+            ],
+          ),
         ),
       ),
     );
@@ -348,36 +628,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
       onTap: onTap,
       child: Column(
         children: [
-          Text(value, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-          Text(label, style: const TextStyle(color: Colors.white54, fontSize: 12)),
+          Text(value, style: GoogleFonts.inter(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w800)),
+          Text(label, style: GoogleFonts.inter(color: Colors.white38, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
         ],
       ),
     );
   }
 
-  String _formatLastActive(DateTime dateTime) {
-    final now = DateTime.now();
-    final diff = now.difference(dateTime);
-
-    if (diff.inMinutes < 1) return 'Just now';
-    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-    if (diff.inHours < 24) return '${diff.inHours}h ago';
-    if (diff.inDays < 7) return '${diff.inDays}d ago';
-    return '${dateTime.day}/${dateTime.month}/${dateTime.year}';
-  }
-
   Color _getRankColor(String rank) {
     switch (rank) {
-      case 'GHOST':
-        return Colors.white38;
-      case 'CHALLENGER':
-        return const Color(0xFF22D3EE); // Neon Cyan
-      case 'ADRENALINE JUNKIE':
-        return const Color(0xFFA855F7); // Purple
-      case 'DAREDEVIL':
-        return Colors.orangeAccent;
-      default:
-        return Colors.white;
+      case 'GHOST': return Colors.white38;
+      case 'CHALLENGER': return const Color(0xFF22D3EE);
+      case 'ADRENALINE JUNKIE': return const Color(0xFFA855F7);
+      case 'DAREDEVIL': return Colors.orangeAccent;
+      default: return Colors.white;
     }
   }
 
@@ -385,7 +649,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF191022),
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(32))),
       builder: (context) => SingleChildScrollView(
         padding: const EdgeInsets.symmetric(vertical: 24),
         child: Column(
@@ -394,20 +658,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
             Container(
               width: 40,
               height: 4,
-              decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+              decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(2)),
             ),
-            const SizedBox(height: 24),
-            _buildSettingsItem(Icons.person_outline, 'Manage Profile', () {
+            const SizedBox(height: 32),
+            _buildSettingsItem(Icons.person_outline_rounded, 'Manage Profile', () {
               Navigator.pop(context);
-              _showManageProfile();
+              _profileFuture.then((user) => _showEditProfileSheet(user));
             }),
-            _buildSettingsItem(Icons.security, 'Security', () {
+            _buildSettingsItem(Icons.security_rounded, 'Security', () {
               Navigator.pop(context);
               _showSecurity();
             }),
             _buildSettingsItem(Icons.diamond_outlined, 'Gem Shop', () {
               Navigator.pop(context);
-              _showGemShop();
+              _showGemsShop(_currentViewedId);
             }),
             _buildSettingsItem(Icons.bug_report_outlined, 'Report Bug / Feedback', () {
               Navigator.pop(context);
@@ -430,77 +694,106 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Widget _buildSettingsItem(IconData icon, String title, VoidCallback onTap) {
     return ListTile(
-      leading: Icon(icon, color: Colors.white70),
-      title: Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500)),
-      trailing: const Icon(Icons.chevron_right, color: Colors.white24),
+      leading: Icon(icon, color: Colors.white70, size: 22),
+      title: Text(title, style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 15)),
+      trailing: const Icon(Icons.chevron_right_rounded, color: Colors.white24),
       onTap: onTap,
-    );
-  }
-
-  void _showManageProfile() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF2A1B3D),
-        title: const Text('Manage Profile', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-        content: const Text('Profile settings coming soon! Update username and bio here.', style: TextStyle(color: Colors.white54)),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('CLOSE', style: TextStyle(color: Color(0xFFA855F7)))),
-        ],
-      ),
     );
   }
 
   void _showSecurity() {
     final passwordController = TextEditingController();
+    final confirmController = TextEditingController();
+    bool isObscured = true;
+
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF2A1B3D),
-        title: const Text('Security', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('New Password', style: TextStyle(color: Colors.white70, fontSize: 12)),
-            const SizedBox(height: 8),
-            TextField(
-              controller: passwordController,
-              obscureText: true,
-              style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(
-                hintText: 'Minimum 6 characters',
-                hintStyle: const TextStyle(color: Colors.white24),
-                filled: true,
-                fillColor: Colors.white.withValues(alpha: 0.05),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: const Color(0xFF191022),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28), side: const BorderSide(color: Colors.white10)),
+          title: Row(
+            children: [
+              const Icon(Icons.shield_rounded, color: Color(0xFFA855F7), size: 28),
+              const SizedBox(width: 12),
+              Text('Security', style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.w900, letterSpacing: 0.5)),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('UPDATE PASSWORD', style: GoogleFonts.inter(color: Colors.white38, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1.5)),
+              const SizedBox(height: 16),
+              TextField(
+                controller: passwordController,
+                obscureText: isObscured,
+                style: const TextStyle(color: Colors.white),
+                decoration: _inputDecoration('New Password', Icons.lock_outline_rounded).copyWith(
+                  suffixIcon: IconButton(
+                    icon: Icon(isObscured ? Icons.visibility_off : Icons.visibility, color: Colors.white38, size: 18),
+                    onPressed: () => setDialogState(() => isObscured = !isObscured),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: confirmController,
+                obscureText: isObscured,
+                style: const TextStyle(color: Colors.white),
+                decoration: _inputDecoration('Confirm Password', Icons.lock_reset_rounded),
+              ),
+              const SizedBox(height: 8),
+              Text('• Minimum 6 characters', style: GoogleFonts.inter(color: Colors.white24, fontSize: 11)),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context), 
+              child: Text('CANCEL', style: GoogleFonts.inter(color: Colors.white38, fontWeight: FontWeight.bold))
+            ),
+            Container(
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(colors: [Color(0xFFEC4899), Color(0xFFA855F7)]),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: ElevatedButton(
+                onPressed: () async {
+                  final pwd = passwordController.text.trim();
+                  final confirm = confirmController.text.trim();
+                  
+                  if (pwd.length < 6) {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Password must be at least 6 characters')));
+                    return;
+                  }
+                  if (pwd != confirm) {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Passwords do not match')));
+                    return;
+                  }
+
+                  try {
+                    await Supabase.instance.client.auth.updateUser(UserAttributes(password: pwd));
+                    if (mounted) {
+                      Navigator.pop(context);
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                        content: Text('Password updated successfully! 🔐'),
+                        backgroundColor: Colors.green,
+                      ));
+                    }
+                  } catch (e) {
+                    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e'), backgroundColor: Colors.redAccent));
+                  }
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.transparent,
+                  shadowColor: Colors.transparent,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                child: const Text('UPDATE', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
               ),
             ),
           ],
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('CANCEL', style: TextStyle(color: Colors.white38))),
-          ElevatedButton(
-            onPressed: () async {
-              final pwd = passwordController.text.trim();
-              if (pwd.length < 6) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Password too short')));
-                return;
-              }
-              try {
-                await Supabase.instance.client.auth.updateUser(UserAttributes(password: pwd));
-                if (mounted) {
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Password updated successfully')));
-                }
-              } catch (e) {
-                if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
-              }
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFA855F7)),
-            child: const Text('UPDATE'),
-          ),
-        ],
       ),
     );
   }
@@ -509,17 +802,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF2A1B3D),
-        title: const Text('Delete Account?', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-        content: const Text(
-          'This will permanently disable your account and hide your profile from others. This action cannot be undone.',
-          style: TextStyle(color: Colors.white54),
+        backgroundColor: const Color(0xFF191022),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: Text('Delete Account?', style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.bold)),
+        content: Text(
+          'This will permanently disable your account. This action cannot be undone.',
+          style: GoogleFonts.inter(color: Colors.white54),
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('CANCEL', style: TextStyle(color: Colors.white38)),
-          ),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('CANCEL', style: TextStyle(color: Colors.white38))),
           ElevatedButton(
             onPressed: () async {
               final myId = Supabase.instance.client.auth.currentUser?.id;
@@ -528,7 +819,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 await Supabase.instance.client.auth.signOut();
               }
             },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
             child: const Text('DELETE'),
           ),
         ],
@@ -536,76 +827,251 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  void _showGemShop() {
-    final userId = Supabase.instance.client.auth.currentUser?.id;
-    if (userId == null) return;
-
-    final packages = [
-      {'gems': 10, 'price': '\$0.99', 'type': 'gems'},
-      {'gems': 50, 'price': '\$4.49', 'type': 'gems'},
-      {'gems': 100, 'price': '\$7.99', 'type': 'gems'},
-      {'name': 'Streak Freeze', 'price': '15 💎', 'type': 'item', 'icon': Icons.ac_unit},
-    ];
-
+  void _showGemsShop(String userId) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: const Color(0xFF191022),
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      builder: (context) => Container(
-        padding: const EdgeInsets.all(24),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(32))),
+      builder: (context) => Padding(
+        padding: const EdgeInsets.all(32.0),
         child: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('GEM SHOP', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold, letterSpacing: 2)),
-            const SizedBox(height: 24),
-            ...packages.map((pkg) {
-              final isItem = pkg['type'] == 'item';
-              return Container(
-                margin: const EdgeInsets.only(bottom: 12),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.05),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: Colors.pinkAccent.withValues(alpha: 0.2)),
-                ),
-                child: ListTile(
-                  leading: Icon(isItem ? pkg['icon'] as IconData : Icons.diamond, color: Colors.pinkAccent),
-                  title: Text(isItem ? pkg['name'] as String : '${pkg['gems']} Gems', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                  trailing: ElevatedButton(
-                    onPressed: () {
-                      if (isItem) {
-                        if (pkg['name'] == 'Streak Freeze') {
-                          _purchaseStreakFreeze(userId);
-                          Navigator.pop(context);
-                        }
-                      }
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.pinkAccent,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    ),
-                    child: Text(pkg['price'] as String, style: const TextStyle(fontWeight: FontWeight.bold)),
-                  ),
-                ),
-              );
-            }).toList(),
-            const SizedBox(height: 24),
+            Text('GEM SHOP', style: GoogleFonts.inter(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w900, letterSpacing: 2)),
+            const SizedBox(height: 8),
+            Text('Fuel your bravery with gems! 💎', style: GoogleFonts.inter(color: Colors.white54, fontSize: 14)),
+            const SizedBox(height: 32),
+            _buildShopItem(userId, '10 Gems', '0.99 USD', 10),
+            const SizedBox(height: 16),
+            _buildShopItem(userId, '50 Gems', '4.49 USD', 50),
+            const SizedBox(height: 16),
+            _buildShopItem(userId, '100 Gems', '7.99 USD', 100),
+            const SizedBox(height: 32),
           ],
         ),
       ),
     );
   }
 
-  Future<void> _purchaseStreakFreeze(String userId) async {
-    try {
-      await _supabaseService.buyStreakFreeze(userId);
-      setState(() {
-        _profileFuture = _supabaseService.fetchProfile(userId);
-      });
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Streak Freeze purchased! ❄️')));
-    } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e'), backgroundColor: Colors.redAccent));
-    }
+  Widget _buildShopItem(String userId, String title, String price, int amount) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Colors.pinkAccent.withValues(alpha: 0.1)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.diamond, color: Colors.pinkAccent, size: 28),
+              const SizedBox(width: 16),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16)),
+                  Text(price, style: GoogleFonts.inter(color: Colors.white38, fontSize: 13, fontWeight: FontWeight.bold)),
+                ],
+              ),
+            ],
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              try {
+                await _supabaseService.updateGems(userId, amount);
+                if (mounted) {
+                  Navigator.pop(context);
+                  setState(() {
+                    _profileFuture = _supabaseService.fetchProfile(userId);
+                  });
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Bought $amount gems! 💎')));
+                }
+              } catch (e) {
+                if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.pinkAccent,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            ),
+            child: const Text('BUY', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showEditProfileSheet(UserModel user) {
+    final usernameController = TextEditingController(text: user.username);
+    final bioController = TextEditingController(text: user.bio ?? '');
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF191022),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(32))),
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom, left: 32, right: 32, top: 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('EDIT PROFILE', style: GoogleFonts.inter(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w900, letterSpacing: 1)),
+            const SizedBox(height: 32),
+            TextField(
+              controller: usernameController,
+              style: const TextStyle(color: Colors.white),
+              decoration: _inputDecoration('Username', Icons.person_outline_rounded),
+            ),
+            const SizedBox(height: 20),
+            TextField(
+              controller: bioController,
+              maxLines: 3,
+              style: const TextStyle(color: Colors.white),
+              decoration: _inputDecoration('Bio', Icons.info_outline_rounded),
+            ),
+            const SizedBox(height: 32),
+            _buildGradientPillButton(
+              label: 'SAVE CHANGES',
+              icon: Icons.check_circle_outline_rounded,
+              onTap: () async {
+                await _supabaseService.updateProfile(user.id, 
+                  username: usernameController.text.trim(), 
+                  bio: bioController.text.trim(),
+                );
+                if (!mounted) return;
+                Navigator.pop(context);
+                setState(() {
+                  _profileFuture = _supabaseService.fetchProfile(user.id);
+                });
+              },
+            ),
+            const SizedBox(height: 48),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showFollowingList(String userId) async {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF191022),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(32))),
+      builder: (context) => FutureBuilder<List<UserModel>>(
+        future: _supabaseService.fetchFollowingDetailed(userId),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const SizedBox(
+              height: 200,
+              child: Center(child: CircularProgressIndicator(color: Color(0xFFA855F7))),
+            );
+          }
+          if (snapshot.hasError) {
+            return SizedBox(
+              height: 200,
+              child: Center(child: Text('Error: ${snapshot.error}', style: const TextStyle(color: Colors.redAccent))),
+            );
+          }
+          final users = snapshot.data ?? [];
+          return Container(
+            height: MediaQuery.of(context).size.height * 0.7,
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(32.0),
+                  child: Text('FOLLOWING', style: GoogleFonts.inter(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w900, letterSpacing: 2)),
+                ),
+                if (users.isEmpty)
+                  const Expanded(child: Center(child: Text('Not following anyone yet.', style: TextStyle(color: Colors.white24)))),
+                if (users.isNotEmpty)
+                  Expanded(
+                    child: ListView.builder(
+                      itemCount: users.length,
+                      itemBuilder: (context, index) {
+                        final followedUser = users[index];
+                        return ListTile(
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 32, vertical: 8),
+                          leading: CircleAvatar(
+                            backgroundColor: Colors.white10,
+                            backgroundImage: followedUser.avatarUrl != null ? NetworkImage(followedUser.avatarUrl!) : null,
+                            child: followedUser.avatarUrl == null ? Text(followedUser.username[0].toUpperCase(), style: const TextStyle(color: Colors.white)) : null,
+                          ),
+                          title: Text(followedUser.username, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                        );
+                      },
+                    ),
+                  ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _showFollowersList(String userId) async {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF191022),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(32))),
+      builder: (context) => FutureBuilder<List<UserModel>>(
+        future: _supabaseService.fetchFollowersDetailed(userId),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const SizedBox(
+              height: 200,
+              child: Center(child: CircularProgressIndicator(color: Color(0xFFA855F7))),
+            );
+          }
+          if (snapshot.hasError) {
+            return SizedBox(
+              height: 200,
+              child: Center(child: Text('Error: ${snapshot.error}', style: const TextStyle(color: Colors.redAccent))),
+            );
+          }
+          final users = snapshot.data ?? [];
+          return Container(
+            height: MediaQuery.of(context).size.height * 0.7,
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(32.0),
+                  child: Text('FOLLOWERS', style: GoogleFonts.inter(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w900, letterSpacing: 2)),
+                ),
+                if (users.isEmpty)
+                  const Expanded(child: Center(child: Text('No followers yet.', style: TextStyle(color: Colors.white24)))),
+                if (users.isNotEmpty)
+                  Expanded(
+                    child: ListView.builder(
+                      itemCount: users.length,
+                      itemBuilder: (context, index) {
+                        final follower = users[index];
+                        return ListTile(
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 32, vertical: 8),
+                          leading: CircleAvatar(
+                            backgroundColor: Colors.white10,
+                            backgroundImage: follower.avatarUrl != null ? NetworkImage(follower.avatarUrl!) : null,
+                            child: follower.avatarUrl == null ? Text(follower.username[0].toUpperCase(), style: const TextStyle(color: Colors.white)) : null,
+                          ),
+                          title: Text(follower.username, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                        );
+                      },
+                    ),
+                  ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
   }
 
   void _showFeedbackDialog() {
@@ -614,7 +1080,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF191022),
-        title: const Text('Send Feedback', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: Text('Send Feedback', style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.bold)),
         content: TextField(
           controller: controller,
           maxLines: 4,
@@ -622,15 +1089,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
           decoration: _inputDecoration('Tell us anything...', Icons.chat_bubble_outline),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('CANCEL', style: TextStyle(color: Colors.white38))),
+          TextButton(onPressed: () => Navigator.pop(context), child: Text('CANCEL', style: const TextStyle(color: Colors.white38))),
           ElevatedButton(
             onPressed: () {
               if (controller.text.isNotEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Feedback sent! Thank you! ❤️')));
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Feedback sent! ❤️')));
                 Navigator.pop(context);
               }
             },
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFA855F7)),
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFA855F7), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
             child: const Text('SEND'),
           ),
         ],
@@ -646,135 +1113,48 @@ class _ProfileScreenState extends State<ProfileScreen> {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF191022),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(32)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.celebration, color: Colors.amber, size: 48),
-            const SizedBox(height: 16),
-            const Text('INVITE FRIENDS', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, letterSpacing: 2)),
-            const SizedBox(height: 8),
-            const Text('Share your code to earn 10 Gems for every friend who joins!', textAlign: TextAlign.center, style: TextStyle(color: Colors.white70, fontSize: 12)),
+            const Icon(Icons.celebration_rounded, color: Colors.amber, size: 64),
             const SizedBox(height: 24),
+            Text('INVITE FRIENDS', style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.w900, letterSpacing: 2)),
+            const SizedBox(height: 12),
+            Text('Share your code to earn 10 Gems!', textAlign: TextAlign.center, style: GoogleFonts.inter(color: Colors.white54, fontSize: 13)),
+            const SizedBox(height: 32),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
               decoration: BoxDecoration(
                 color: Colors.white.withValues(alpha: 0.05),
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(24),
                 border: Border.all(color: Colors.white10),
               ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(referralCode, style: const TextStyle(color: Color(0xFF22D3EE), fontSize: 18, fontWeight: FontWeight.bold, letterSpacing: 2)),
-                  IconButton(
-                    icon: const Icon(Icons.copy, color: Colors.white54, size: 20),
-                    onPressed: () {
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Code copied to clipboard!')));
-                    },
-                  ),
+                  Text(referralCode, style: GoogleFonts.inter(color: const Color(0xFF22D3EE), fontSize: 20, fontWeight: FontWeight.w900, letterSpacing: 2)),
+                  IconButton(icon: const Icon(Icons.copy_rounded, color: Colors.white38), onPressed: () {}),
                 ],
               ),
             ),
-            const SizedBox(height: 24),
-            ElevatedButton.icon(
-              onPressed: () {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Share link generated!')));
-              },
-              icon: const Icon(Icons.share, size: 18),
-              label: const Text('SHARE LINK'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFA855F7),
-                minimumSize: const Size(double.infinity, 44),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              ),
-            ),
+            const SizedBox(height: 32),
+            _buildGradientPillButton(label: 'SHARE LINK', icon: Icons.share_rounded, onTap: () => Navigator.pop(context)),
           ],
         ),
       ),
     );
   }
 
-  Future<void> _showFollowingList(String userId) async {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: const Color(0xFF191022),
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      builder: (context) => StatefulBuilder(
-        builder: (context, setModalState) {
-          return FutureBuilder<List<String>>(
-            future: _supabaseService.fetchFollowingIds(userId),
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator(color: Color(0xFFA855F7)));
-              }
-              final ids = snapshot.data ?? [];
-              if (ids.isEmpty) {
-                return const Center(child: Text('Not following anyone yet.', style: TextStyle(color: Colors.white38)));
-              }
-
-              return Column(
-                children: [
-                  const Padding(
-                    padding: EdgeInsets.all(16.0),
-                    child: Text('Following', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-                  ),
-                  Expanded(
-                    child: ListView.builder(
-                      itemCount: ids.length,
-                      itemBuilder: (context, index) {
-                        return FutureBuilder<UserModel>(
-                          future: _supabaseService.fetchProfile(ids[index]),
-                          builder: (context, userSnapshot) {
-                            if (!userSnapshot.hasData) return const SizedBox.shrink();
-                            final followedUser = userSnapshot.data!;
-                            return ListTile(
-                              leading: CircleAvatar(
-                                backgroundColor: const Color(0xFFA855F7).withValues(alpha: 0.2),
-                                child: Text(followedUser.username[0].toUpperCase(), style: const TextStyle(color: Color(0xFFA855F7))),
-                              ),
-                              title: Text(followedUser.username, style: const TextStyle(color: Colors.white)),
-                              trailing: TextButton(
-                                onPressed: () async {
-                                  await _supabaseService.unfollowUser(userId, followedUser.id);
-                                  setModalState(() {});
-                                  setState(() {
-                                    _profileFuture = _supabaseService.fetchProfile(userId);
-                                  });
-                                },
-                                child: const Text('UNFOLLOW', style: TextStyle(color: Colors.redAccent, fontSize: 12)),
-                              ),
-                            );
-                          },
-                        );
-                      },
-                    ),
-                  ),
-                ],
-              );
-            },
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _buildStatBox(BuildContext context, String title, String value, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 20),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: color.withValues(alpha: 0.2)),
-      ),
-      child: Column(
-        children: [
-          Text(title, style: const TextStyle(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-          Text(value, style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
-        ],
-      ),
+  InputDecoration _inputDecoration(String label, IconData icon) {
+    return InputDecoration(
+      labelText: label,
+      labelStyle: GoogleFonts.inter(color: Colors.white38, fontSize: 13, fontWeight: FontWeight.w600),
+      prefixIcon: Icon(icon, color: const Color(0xFFA855F7), size: 20),
+      filled: true,
+      fillColor: Colors.white.withValues(alpha: 0.05),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(20), borderSide: BorderSide.none),
+      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(20), borderSide: const BorderSide(color: Color(0xFFA855F7), width: 1)),
     );
   }
 
@@ -788,209 +1168,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e'), backgroundColor: Colors.redAccent));
     }
-  }
-
-  void _showGemsShop(String userId) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: const Color(0xFF191022),
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      builder: (context) => Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Buy Gems', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            const Text('Fuel your bravery with gems! 💎', style: TextStyle(color: Colors.white54, fontSize: 14)),
-            const SizedBox(height: 24),
-            _buildShopItem(userId, '5 Gems', '0.99 USD', 5),
-            const SizedBox(height: 12),
-            _buildShopItem(userId, '30 Gems', '4.99 USD', 30),
-            const SizedBox(height: 12),
-            _buildShopItem(userId, '80 Gems', '9.99 USD', 80),
-            const SizedBox(height: 24),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildShopItem(String userId, String title, String price, int amount) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.pinkAccent.withValues(alpha: 0.2)),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.diamond, color: Colors.pinkAccent, size: 24),
-              const SizedBox(width: 12),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                  Text(price, style: const TextStyle(color: Colors.white54, fontSize: 12)),
-                ],
-              ),
-            ],
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              try {
-                await _supabaseService.updateGems(userId, amount);
-                if (mounted) {
-                  Navigator.pop(context);
-                  setState(() {
-                    _profileFuture = _supabaseService.fetchProfile(userId);
-                  });
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Successfully bought $amount gems! 💎')));
-                }
-              } catch (e) {
-                if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
-              }
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.pinkAccent,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-            ),
-            child: const Text('PURCHASE', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showEditProfileSheet(UserModel user) {
-    final usernameController = TextEditingController(text: user.username);
-    final bioController = TextEditingController(text: user.bio ?? '');
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: const Color(0xFF2A1B3D),
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      builder: (ctx) => Padding(
-        padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom, left: 24, right: 24, top: 24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Edit Profile', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 24),
-            TextField(
-              controller: usernameController,
-              style: const TextStyle(color: Colors.white),
-              decoration: _inputDecoration('Username', Icons.person),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: bioController,
-              maxLines: 3,
-              style: const TextStyle(color: Colors.white),
-              decoration: _inputDecoration('Bio', Icons.info_outline),
-            ),
-            const SizedBox(height: 24),
-            const Text('Your Interests', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 12),
-            StatefulBuilder(
-              builder: (context, setSheetState) {
-                final categories = ['AI', 'Fitness', 'Tech', 'Nature', 'Extreme', 'Social'];
-                final selected = List<String>.from(user.interests ?? []);
-                
-                return Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: categories.map((cat) {
-                    final isSelected = selected.contains(cat);
-                    return FilterChip(
-                      label: Text(cat, style: const TextStyle(fontSize: 12)),
-                      selected: isSelected,
-                      onSelected: (val) {
-                        setSheetState(() {
-                          if (val) selected.add(cat);
-                          else selected.remove(cat);
-                        });
-                        // Update the outer user object interests locally to save later
-                        (user.interests as List<String>?)?.clear();
-                        (user.interests as List<String>?)?.addAll(selected);
-                      },
-                      selectedColor: const Color(0xFFA855F7).withValues(alpha: 0.3),
-                      checkmarkColor: const Color(0xFFA855F7),
-                      backgroundColor: Colors.white.withValues(alpha: 0.05),
-                      labelStyle: TextStyle(color: isSelected ? const Color(0xFFA855F7) : Colors.white70),
-                    );
-                  }).toList(),
-                );
-              },
-            ),
-            const SizedBox(height: 24),
-            const Text('Language', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.05),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: DropdownButton<String>(
-                value: 'English',
-                dropdownColor: const Color(0xFF191022),
-                underline: const SizedBox(),
-                isExpanded: true,
-                items: ['English', 'Spanish', 'French'].map((String value) {
-                  return DropdownMenuItem<String>(
-                    value: value,
-                    child: Text(value, style: const TextStyle(color: Colors.white)),
-                  );
-                }).toList(),
-                onChanged: (val) {},
-              ),
-            ),
-            const SizedBox(height: 32),
-            ElevatedButton(
-              onPressed: () async {
-                await _supabaseService.updateProfile(user.id, 
-                  username: usernameController.text, 
-                  bio: bioController.text,
-                  interests: user.interests,
-                );
-                if (!mounted) return;
-                Navigator.of(context).pop();
-                setState(() {
-                  _profileFuture = _supabaseService.fetchProfile(user.id);
-                });
-              },
-              style: ElevatedButton.styleFrom(
-                minimumSize: const Size(double.infinity, 56),
-                backgroundColor: const Color(0xFFA855F7),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              ),
-              child: const Text('SAVE CHANGES'),
-            ),
-            const SizedBox(height: 24),
-          ],
-        ),
-      ),
-    );
-  }
-
-  InputDecoration _inputDecoration(String label, IconData icon) {
-    return InputDecoration(
-      labelText: label,
-      labelStyle: TextStyle(color: Colors.white.withValues(alpha: 0.5)),
-      prefixIcon: Icon(icon, color: const Color(0xFFA855F7)),
-      filled: true,
-      fillColor: Colors.white.withValues(alpha: 0.05),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
-    );
   }
 }
 
@@ -1024,109 +1201,40 @@ class _ProfileMemoriesState extends State<ProfileMemories> {
       future: _memoriesFuture,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator(color: Color(0xFFA855F7)));
+          return const Center(child: Padding(padding: EdgeInsets.all(40), child: CircularProgressIndicator(color: Color(0xFFA855F7))));
         }
         final attempts = snapshot.data ?? [];
         if (attempts.isEmpty) {
-          return const Center(
-            child: Text(
-              'No dares recorded yet. Go prove your bravery!',
-              style: TextStyle(color: Colors.white24, fontSize: 12),
-            ),
-          );
+          return Center(child: Padding(padding: const EdgeInsets.all(40), child: Text('No memories yet. Go prove your bravery!', textAlign: TextAlign.center, style: GoogleFonts.inter(color: Colors.white24, fontSize: 13))));
         }
 
         return GridView.builder(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 3,
-            crossAxisSpacing: 8,
-            mainAxisSpacing: 8,
-            childAspectRatio: 0.8,
-          ),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 3, crossAxisSpacing: 12, mainAxisSpacing: 12, childAspectRatio: 1),
           itemCount: attempts.length,
           itemBuilder: (context, index) {
             final attempt = attempts[index];
-            return Stack(
-              children: [
-                GestureDetector(
-                  onTap: () => _showVideoPlayer(context, attempt),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.05),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-                    ),
-                    child: Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Icon(Icons.play_circle_outline, color: Colors.white38, size: 32),
-                          if (attempt.dareTitle != null)
-                            Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 4),
-                              child: Text(
-                                attempt.dareTitle!,
-                                style: const TextStyle(color: Colors.white24, fontSize: 8),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ),
+            return GestureDetector(
+              onTap: () => _showVideoPlayer(context, attempt),
+              child: Container(
+                clipBehavior: Clip.antiAlias,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.05),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: Colors.white10),
                 ),
-                if (widget.isOwnProfile)
-                  Positioned(
-                    top: 4,
-                    right: 4,
-                    child: GestureDetector(
-                      onTap: () => _confirmDelete(context, attempt.id),
-                      child: Container(
-                        padding: const EdgeInsets.all(4),
-                        decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.5), shape: BoxShape.circle),
-                        child: const Icon(Icons.close, color: Colors.redAccent, size: 14),
-                      ),
-                    ),
-                  ),
-              ],
+                child: const Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    Icon(Icons.play_circle_fill_rounded, color: Colors.white24, size: 32),
+                  ],
+                ),
+              ),
             );
           },
         );
       },
-    );
-  }
-
-  void _confirmDelete(BuildContext context, String attemptId) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF2A1B3D),
-        title: const Text('Delete Memory?'),
-        content: const Text('This will remove this dare proof permanently from your profile and feed.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('CANCEL', style: TextStyle(color: Colors.white38))),
-          ElevatedButton(
-            onPressed: () async {
-              try {
-                await SupabaseService().deleteAttempt(attemptId);
-                if (mounted) {
-                  Navigator.pop(context);
-                  _loadMemories();
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Memory deleted')));
-                }
-              } catch (e) {
-                if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
-              }
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
-            child: const Text('DELETE'),
-          ),
-        ],
-      ),
     );
   }
 
@@ -1136,19 +1244,7 @@ class _ProfileMemoriesState extends State<ProfileMemories> {
       builder: (context) => Dialog(
         backgroundColor: Colors.black,
         insetPadding: const EdgeInsets.all(10),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            AspectRatio(
-              aspectRatio: 9 / 16,
-              child: SimpleVideoPlayer(url: attempt.videoUrl),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('CLOSE', style: TextStyle(color: Colors.white)),
-            ),
-          ],
-        ),
+        child: AspectRatio(aspectRatio: 9/16, child: SimpleVideoPlayer(url: attempt.videoUrl)),
       ),
     );
   }
@@ -1171,12 +1267,7 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer> {
     super.initState();
     _controller = VideoPlayerController.networkUrl(Uri.parse(widget.url));
     _controller.initialize().then((_) {
-      _controller.setVolume(0); // Mute audio outside feed
-      _chewieController = ChewieController(
-        videoPlayerController: _controller,
-        autoPlay: true,
-        looping: true,
-      );
+      _chewieController = ChewieController(videoPlayerController: _controller, autoPlay: true, looping: true, aspectRatio: 9/16);
       if (mounted) setState(() {});
     });
   }

@@ -14,7 +14,7 @@ class SupabaseService {
     await _supabase.from('profiles').upsert({
       'id': userId,
       'username': username,
-      'coins': 1000,
+      'coins': 0,
       'streak': 0,
     });
   }
@@ -52,6 +52,27 @@ class SupabaseService {
     await _supabase.from('profiles').update({'gems': profile.gems + delta}).eq('id', userId);
   }
 
+  Future<void> recordDailySkip(String userId, String dareId) async {
+    // 1. Deduct 50 coins
+    await updateCoins(userId, -50);
+
+    // 2. Insert into user_attempts as placeholder
+    await _supabase.from('user_attempts').insert({
+      'user_id': userId,
+      'dare_id': dareId,
+      'video_url': 'skipped', // Placeholder to satisfy completion check
+      'status': 'verified',   // Mark as done immediately
+      'completed_at': DateTime.now().toIso8601String(),
+    });
+
+    // 3. Reset daily/weekly progress if needed
+    // Setting last_dare_date ensures it doesn't show up again today
+    await _supabase.from('profiles').update({
+      'last_dare_date': DateTime.now().toLocal().toString().split(' ')[0],
+      'weekly_progress': 0, // Per requirement: "reset your daily progress"
+    }).eq('id', userId);
+  }
+
   Future<void> updateLastActive(String userId) async {
     await _supabase.from('profiles').update({'last_active': DateTime.now().toUtc().toIso8601String()}).eq('id', userId);
   }
@@ -62,6 +83,20 @@ class SupabaseService {
 
   Future<void> deleteProfile(String userId) async {
     await _supabase.from('profiles').update({'deleted_at': DateTime.now().toUtc().toIso8601String()}).eq('id', userId);
+  }
+
+  Future<String> uploadProfilePicture(String userId, File imageFile) async {
+    final fileName = '${DateTime.now().millisecondsSinceEpoch}.jpg';
+    final path = '$userId/$fileName';
+    final bytes = await imageFile.readAsBytes();
+    await _supabase.storage.from('avatars').uploadBinary(
+      path, 
+      bytes, 
+      fileOptions: const FileOptions(contentType: 'image/jpeg', upsert: true)
+    );
+    final url = _supabase.storage.from('avatars').getPublicUrl(path);
+    await _supabase.from('profiles').update({'avatar_url': url}).eq('id', userId);
+    return url;
   }
 
   // --- Economy/Items ---
@@ -95,6 +130,7 @@ class SupabaseService {
     final response = await _supabase
         .from('user_attempts')
         .select('*, profiles(username), dares_master(title)')
+        .neq('video_url', 'skipped')
         .order('completed_at', ascending: false);
     return (response as List).map((json) => UserAttemptModel.fromJson(json)).toList();
   }
@@ -107,6 +143,7 @@ class SupabaseService {
         .from('user_attempts')
         .select('*, profiles(username), dares_master(title)')
         .inFilter('user_id', followingIds)
+        .neq('video_url', 'skipped')
         .order('completed_at', ascending: false);
     return (response as List).map((json) => UserAttemptModel.fromJson(json)).toList();
   }
@@ -129,6 +166,31 @@ class SupabaseService {
     await _supabase.from('user_attempts').delete().eq('id', attemptId);
   }
 
+  Future<void> useSkipToken(String userId, String dareId) async {
+    final profile = await fetchProfile(userId);
+    if (profile.skipTokens < 1) throw Exception('No skip tokens available');
+
+    // 1. Decrement skip tokens
+    await _supabase.from('profiles').update({
+      'skip_tokens': profile.skipTokens - 1,
+    }).eq('id', userId);
+
+    // 2. Insert into user_attempts as placeholder
+    await _supabase.from('user_attempts').insert({
+      'user_id': userId,
+      'dare_id': dareId,
+      'video_url': 'skipped',
+      'status': 'verified',
+      'completed_at': DateTime.now().toIso8601String(),
+    });
+
+    // 3. Mark dare as done for today but PRESERVE progress
+    await _supabase.from('profiles').update({
+      'last_dare_date': DateTime.now().toLocal().toString().split(' ')[0],
+      // NOT resetting weekly_progress or streak here
+    }).eq('id', userId);
+  }
+
   Future<String> uploadVideo(File videoFile) async {
     final fileName = '${DateTime.now().millisecondsSinceEpoch}.mp4';
     final path = 'attempts/$fileName';
@@ -138,7 +200,12 @@ class SupabaseService {
   }
 
   Future<List<UserAttemptModel>> fetchUserAttempts(String userId) async {
-    final response = await _supabase.from('user_attempts').select().eq('user_id', userId).order('completed_at', ascending: false);
+    final response = await _supabase
+        .from('user_attempts')
+        .select()
+        .eq('user_id', userId)
+        .neq('video_url', 'skipped')
+        .order('completed_at', ascending: false);
     return (response as List).map((json) => UserAttemptModel.fromJson(json)).toList();
   }
 
@@ -146,11 +213,10 @@ class SupabaseService {
   /// Useful for AI-generated dares and friend challenges that aren't yet in the master list.
   Future<void> ensureDareExists(DareModel dare) async {
     try {
-      await _supabase.from('dares_master').upsert(dare.toJson());
+      await _supabase.from('dares_master').upsert(dare.toMasterJson());
     } catch (e) {
-      debugPrint('Note: Error ensuring dare exists (might already exist or schema mismatch): $e');
-      // We don't want to block the whole flow if this fails (e.g. RLS issues on master table)
-      // but it helps if it works.
+      debugPrint('CRITICAL: Error ensuring dare exists in master: $e');
+      rethrow; // Rethrow so ProofPreviewScreen can catch it and show exact error
     }
   }
 
@@ -187,6 +253,39 @@ class SupabaseService {
   Future<List<String>> fetchFollowingIds(String userId) async {
     final response = await _supabase.from('social_graph').select('following_id').eq('follower_id', userId);
     return (response as List).map((json) => json['following_id'] as String).toList();
+  }
+
+  Future<List<String>> fetchFollowerIds(String userId) async {
+    final response = await _supabase.from('social_graph').select('follower_id').eq('following_id', userId);
+    return (response as List).map((json) => json['follower_id'] as String).toList();
+  }
+
+  Future<List<UserModel>> fetchFollowingDetailed(String userId) async {
+    try {
+      final res = await _supabase.from('social_graph').select('following_id').eq('follower_id', userId);
+      final ids = (res as List).map((row) => row['following_id'] as String).toList();
+      if (ids.isEmpty) return [];
+      
+      final profilesRes = await _supabase.from('profiles').select().inFilter('id', ids);
+      return (profilesRes as List).map((json) => UserModel.fromJson(json)).toList();
+    } catch (e) {
+      print('Error in fetchFollowingDetailed: $e');
+      rethrow;
+    }
+  }
+
+  Future<List<UserModel>> fetchFollowersDetailed(String userId) async {
+    try {
+      final res = await _supabase.from('social_graph').select('follower_id').eq('following_id', userId);
+      final ids = (res as List).map((row) => row['follower_id'] as String).toList();
+      if (ids.isEmpty) return [];
+      
+      final profilesRes = await _supabase.from('profiles').select().inFilter('id', ids);
+      return (profilesRes as List).map((json) => UserModel.fromJson(json)).toList();
+    } catch (e) {
+      print('Error in fetchFollowersDetailed: $e');
+      rethrow;
+    }
   }
 
   Future<DareModel?> fetchDailyChallenge({String difficulty = 'Medium'}) async {
@@ -337,7 +436,7 @@ class SupabaseService {
       // Try profiles join first.
       final res = await _supabase
           .from('comments')
-          .select('*, profiles!comments_user_id_fkey(username)')
+          .select('*, profiles(username)') // Removed the potentially incorrect hint
           .eq('attempt_id', attemptId)
           .order('created_at', ascending: false);
       

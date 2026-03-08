@@ -320,6 +320,4 @@ class _ProofPreviewScreenState extends State<ProofPreviewScreen> {
     }
     return frames;
   }
-
-  }
 }

@@ -43,9 +43,20 @@ class _RankingSheetState extends State<RankingSheet> with SingleTickerProviderSt
         children: [
           const SizedBox(height: 12),
           Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))),
-          const Padding(
-            padding: EdgeInsets.all(16),
-            child: Text('RANKING', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold, letterSpacing: 2)),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Spacer(),
+                const Text('RANKING', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold, letterSpacing: 2)),
+                const Spacer(),
+                IconButton(
+                  icon: const Icon(Icons.info_outline, color: Colors.white24, size: 20),
+                  onPressed: () => _showRankInfo(context),
+                ),
+              ],
+            ),
           ),
           TabBar(
             controller: _tabController,
@@ -208,5 +219,45 @@ class _RankingSheetState extends State<RankingSheet> with SingleTickerProviderSt
       case 'DAREDEVIL': return Colors.orangeAccent;
       default: return Colors.white38;
     }
+  }
+
+  void _showRankInfo(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF191022),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: const BorderSide(color: Colors.white10)),
+        title: const Text('RANKING SYSTEM', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16, letterSpacing: 1)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildRankInfoRow('GHOST', '0-49 pts', Colors.white38),
+            const SizedBox(height: 12),
+            _buildRankInfoRow('CHALLENGER', '50-199 pts', const Color(0xFF22D3EE)),
+            const SizedBox(height: 12),
+            _buildRankInfoRow('ADRENALINE JUNKIE', '200-499 pts', const Color(0xFFA855F7)),
+            const SizedBox(height: 12),
+            _buildRankInfoRow('DAREDEVIL', '500+ pts', Colors.orangeAccent),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('GOT IT', style: TextStyle(color: Color(0xFF22D3EE), fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRankInfoRow(String title, String threshold, Color color) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(title, style: TextStyle(color: color, fontWeight: FontWeight.w900, fontSize: 11, letterSpacing: 0.5)),
+        Text(threshold, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+      ],
+    );
   }
 }

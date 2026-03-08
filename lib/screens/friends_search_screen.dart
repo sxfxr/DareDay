@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/supabase_service.dart';
+import '../services/ai_service.dart';
 import '../models/user_model.dart';
 import 'profile_screen.dart';
 
@@ -14,6 +15,7 @@ class FriendsSearchScreen extends StatefulWidget {
 class _FriendsSearchScreenState extends State<FriendsSearchScreen> {
   final TextEditingController _searchController = TextEditingController();
   final SupabaseService _supabaseService = SupabaseService();
+  final AiService _aiService = AiService();
   List<UserModel> _searchResults = [];
   Set<String> _followingIds = {};
   bool _isSearching = false;
@@ -81,78 +83,83 @@ class _FriendsSearchScreenState extends State<FriendsSearchScreen> {
               ? const Center(child: CircularProgressIndicator(color: neonCyan))
               : _searchResults.isEmpty && _searchController.text.isNotEmpty
                 ? const Center(child: Text('No users found.', style: TextStyle(color: Colors.white38)))
-                : ListView.builder(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    itemCount: _searchResults.length,
-                    itemBuilder: (context, index) {
-                      final user = _searchResults[index];
-                      final isFollowing = _followingIds.contains(user.id);
+                : RefreshIndicator(
+                    onRefresh: () => _loadFollowing(),
+                    color: neonCyan,
+                    backgroundColor: backgroundDark,
+                    child: ListView.builder(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      itemCount: _searchResults.length,
+                      itemBuilder: (context, index) {
+                        final user = _searchResults[index];
+                        final isFollowing = _followingIds.contains(user.id);
 
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 12.0),
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.02),
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: InkWell(
-                            onTap: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) => ProfileScreen(userId: user.id),
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 12.0),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.02),
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: InkWell(
+                              onTap: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => ProfileScreen(userId: user.id),
+                                  ),
+                                );
+                              },
+                              child: ListTile(
+                                leading: CircleAvatar(
+                                  backgroundColor: neonCyan.withOpacity(0.2),
+                                  backgroundImage: NetworkImage(user.avatarUrl ?? 'https://api.dicebear.com/7.x/avataaars/png?seed=${user.username}&backgroundColor=b6e3f4,c0aede,d1d4f9'),
                                 ),
-                              );
-                            },
-                            child: ListTile(
-                              leading: CircleAvatar(
-                                backgroundColor: neonCyan.withOpacity(0.2),
-                                child: Text(user.username[0].toUpperCase(), 
-                                  style: const TextStyle(color: neonCyan, fontWeight: FontWeight.bold)),
-                              ),
-                              title: Text(user.username, style: const TextStyle(fontWeight: FontWeight.bold)),
-                              subtitle: Text(user.bio ?? 'New DareDay user', style: const TextStyle(fontSize: 12, color: Colors.white38)),
-                              trailing: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  FutureBuilder<bool>(
-                                    future: _supabaseService.checkMutualFollow(currentId ?? '', user.id),
-                                    builder: (context, snapshot) {
-                                      final isMutual = snapshot.data ?? false;
-                                      if (!isMutual) return const SizedBox.shrink();
-                                      return ElevatedButton(
-                                        onPressed: () => _sendCustomDare(user),
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: Colors.pinkAccent.withOpacity(0.1),
-                                          foregroundColor: Colors.pinkAccent,
-                                          elevation: 0,
-                                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                        ),
-                                        child: const Text('DARE', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
-                                      );
-                                    },
-                                  ),
-                                  const SizedBox(width: 8),
-                                  ElevatedButton(
-                                    onPressed: () => _toggleFollow(user.id),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: isFollowing ? neonCyan : neonCyan.withOpacity(0.1),
-                                      foregroundColor: isFollowing ? Colors.black : neonCyan,
-                                      elevation: 0,
-                                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                title: Text(user.username, style: const TextStyle(fontWeight: FontWeight.bold)),
+                                subtitle: Text(user.bio ?? 'New DareDay user', style: const TextStyle(fontSize: 12, color: Colors.white38)),
+                                trailing: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    FutureBuilder<bool>(
+                                      future: _supabaseService.checkMutualFollow(currentId ?? '', user.id),
+                                      builder: (context, snapshot) {
+                                        final isMutual = snapshot.data ?? false;
+                                        if (!isMutual) return const SizedBox.shrink();
+                                        return ElevatedButton(
+                                          onPressed: () => _sendCustomDare(user),
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: Colors.pinkAccent.withOpacity(0.1),
+                                            foregroundColor: Colors.pinkAccent,
+                                            elevation: 0,
+                                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                          ),
+                                          child: const Text('DARE', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+                                        );
+                                      },
                                     ),
-                                    child: Text(isFollowing ? 'FOLLOWING' : 'FOLLOW', 
-                                      style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
-                                  ),
-                                ],
+                                    const SizedBox(width: 8),
+                                    ElevatedButton(
+                                      onPressed: () => _toggleFollow(user.id),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: isFollowing ? neonCyan : neonCyan.withOpacity(0.1),
+                                        foregroundColor: isFollowing ? Colors.black : neonCyan,
+                                        elevation: 0,
+                                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                      ),
+                                      child: Text(isFollowing ? 'FOLLOWING' : 'FOLLOW', 
+                                        style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                      );
-                    },
+                        );
+                      },
+                    ),
                   ),
           ),
           if (_isProcessing)
@@ -268,10 +275,12 @@ class _FriendsSearchScreenState extends State<FriendsSearchScreen> {
         final profile = await _supabaseService.fetchProfile(userId);
         if (profile.gems < 15) throw Exception('Insufficient Gems! You need 15.');
 
-        // [PLACEHOLDER] AI Verification (Disabled for testing)
-        // final isSafe = await _aiService.verifyCustomDare(titleController.text, instrController.text);
+        // AI Verification
+        final verification = await _aiService.verifyCustomDare(titleController.text, instrController.text);
         
-        // Deduction and sending challenge follows
+        if (!verification['is_safe']) {
+          throw Exception('AI Verification Failed: ${verification['reason']}');
+        }
 
         // Deduct gems
         await _supabaseService.updateGems(userId, -15);

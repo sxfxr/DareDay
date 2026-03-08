@@ -173,6 +173,8 @@ class _DarePlayerState extends State<DarePlayer> {
   bool _showHeart = false;
   Offset _heartPosition = Offset.zero;
   CommentModel? _latestComment;
+  bool _hasError = false;
+  String? _errorMsg;
 
   @override
   void initState() {
@@ -195,18 +197,28 @@ class _DarePlayerState extends State<DarePlayer> {
   }
 
   Future<void> _initializePlayer() async {
-    _videoController = VideoPlayerController.networkUrl(Uri.parse(widget.attempt.videoUrl));
-    await _videoController!.initialize();
-    
-    _chewieController = ChewieController(
-      videoPlayerController: _videoController!,
-      autoPlay: true,
-      looping: true,
-      showControls: false,
-      aspectRatio: _videoController!.value.aspectRatio,
-    );
-    
-    if (mounted) setState(() {});
+    try {
+      _videoController = VideoPlayerController.networkUrl(Uri.parse(widget.attempt.videoUrl));
+      await _videoController!.initialize();
+      
+      _chewieController = ChewieController(
+        videoPlayerController: _videoController!,
+        autoPlay: true,
+        looping: true,
+        showControls: false,
+        aspectRatio: _videoController!.value.aspectRatio,
+      );
+      
+      if (mounted) setState(() {});
+    } catch (e) {
+      debugPrint('Video Player error for ${widget.attempt.id}: $e');
+      if (mounted) {
+        setState(() {
+          _hasError = true;
+          _errorMsg = e.toString();
+        });
+      }
+    }
   }
 
   @override
@@ -237,10 +249,12 @@ class _DarePlayerState extends State<DarePlayer> {
             children: [
               // Video Player
             Positioned.fill(
-              child: _chewieController != null && _chewieController!.videoPlayerController.value.isInitialized
-                  ? Chewie(controller: _chewieController!)
-                  : const Center(child: CircularProgressIndicator(color: Color(0xFFA855F7))),
-            ),
+                child: _hasError 
+                    ? _buildErrorPlaceholder()
+                    : _chewieController != null && _chewieController!.videoPlayerController.value.isInitialized
+                        ? Chewie(controller: _chewieController!)
+                        : const Center(child: CircularProgressIndicator(color: Color(0xFFA855F7))),
+              ),
         
         // Overlays
         Positioned.fill(
@@ -420,6 +434,44 @@ class _DarePlayerState extends State<DarePlayer> {
         padding: const EdgeInsets.all(4),
         decoration: const BoxDecoration(color: Color(0xFFA855F7), shape: BoxShape.circle),
         child: const Icon(Icons.add, color: Colors.white, size: 20),
+      ),
+    );
+  }
+
+  Widget _buildErrorPlaceholder() {
+    return Container(
+      color: Colors.black87,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.error_outline_rounded, color: Colors.redAccent, size: 48),
+          const SizedBox(height: 16),
+          const Text(
+            'Failed to load video',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          ),
+          if (_errorMsg != null)
+            Padding(
+              padding: const EdgeInsets.all(24.0),
+              child: Text(
+                _errorMsg!,
+                style: const TextStyle(color: Colors.white38, fontSize: 10),
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          TextButton(
+            onPressed: () {
+              setState(() {
+                _hasError = false;
+                _errorMsg = null;
+                _initializePlayer();
+              });
+            },
+            child: const Text('RETRY', style: TextStyle(color: Color(0xFFA855F7))),
+          ),
+        ],
       ),
     );
   }

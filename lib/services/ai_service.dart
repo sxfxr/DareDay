@@ -1,11 +1,12 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import '../models/dare_model.dart';
 import '../models/dare_verification_result.dart';
 
 class AiService {
-  static const _apiKey = 'AIzaSyCLqCaYVXlQu7K7r1s2yeLXKJShR7E5gp8';
+  static String get _apiKey => dotenv.env['GEMINI_API_KEY'] ?? '';
   static const _model = 'gemma-3-27b-it';
   static const _baseUrl = 'https://generativelanguage.googleapis.com/v1beta/models';
 
@@ -138,22 +139,37 @@ Rules:
     }
   }
 
-  /// Verifies if a custom dare is safe, fair, and appropriate
-  Future<bool> verifyCustomDare(String title, String instructions) async {
+  /// Verifies if a custom dare is safe, fair, and appropriate using Gemma
+  Future<Map<String, dynamic>> verifyCustomDare(String title, String instructions) async {
     final url = Uri.parse('$_baseUrl/$_model:generateContent?key=$_apiKey');
     
     final prompt = '''
-    You are a safety moderator for DareDay. Verify this dare:
-    Title: $title
-    Instructions: $instructions
-    
-    Rules: Safe, Legal, Appropriate, Realistic.
-    Return JSON only: { "is_safe": true/false }
-    ''';
+You are a strict safety and fairness moderator for DareDay, a social dare-sharing app.
+Your goal is to ensure custom dares sent between friends are safe, appropriate, legal, and realistic.
+
+DARE TITLE: $title
+DARE INSTRUCTIONS: $instructions
+
+Rules for "is_safe": true
+1. No physical harm, danger, or illegal acts.
+2. No sexual content or harassment.
+3. Must be realistic for an average person to perform.
+4. No bullying or targeted hate.
+5. Must be fun and social.
+
+Respond ONLY with valid JSON:
+{ 
+  "is_safe": true/false,
+  "reason": "Brief explanation if is_safe is false, otherwise empty"
+}
+''';
 
     final body = jsonEncode({
       'contents': [{'parts': [{'text': prompt}]}],
-      'generationConfig': {'temperature': 0.1}
+      'generationConfig': {
+        'temperature': 0.1,
+        'maxOutputTokens': 200,
+      }
     });
 
     final client = HttpClient();
@@ -162,24 +178,35 @@ Rules:
       request.headers.set('Content-Type', 'application/json');
       request.write(body);
       final response = await request.close();
-      if (response.statusCode != 200) return false;
       
       final responseBody = await response.transform(utf8.decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('AI Verification failed (HTTP ${response.statusCode})');
+      }
+      
       final data = jsonDecode(responseBody) as Map<String, dynamic>;
       final text = data['candidates'][0]['content']['parts'][0]['text'] as String;
       
-      // --- ROBUST JSON EXTRACTION ---
+      // Robust extraction
       String cleanedText = text.trim();
       final firstBrace = cleanedText.indexOf('{');
       final lastBrace = cleanedText.lastIndexOf('}');
-      
-      if (firstBrace == -1 || lastBrace == -1) return false;
+      if (firstBrace == -1 || lastBrace == -1) throw const FormatException('Invalid AI response format');
       
       cleanedText = cleanedText.substring(firstBrace, lastBrace + 1);
       final result = jsonDecode(cleanedText) as Map<String, dynamic>;
-      return result['is_safe'] == true;
+      
+      return {
+        'is_safe': result['is_safe'] == true,
+        'reason': result['reason'] ?? 'Rejected by AI safety filters',
+      };
     } catch (e) {
-      return false;
+      debugPrint('AI Verification Error: $e');
+      // On error, we default to false for safety
+      return {
+        'is_safe': false,
+        'reason': 'Verification system error. Please try again.',
+      };
     } finally {
       client.close();
     }
