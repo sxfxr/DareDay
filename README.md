@@ -23,7 +23,7 @@
 ## ✨ Features
 
 ### 🎯 Daily Dares
-- A rotating daily dare pulled from the `dares_master` table, with difficulty selection (Easy / Medium / Hard / Insane).
+- A rotating daily dare pulled from the `dares_master` table, with difficulty selection (Easy / Medium / Hard ).
 - Countdown timer showing time remaining until the next dare.
 - Options to **skip** (costs 50 pts and resets streak) or use a **Skip Token** (preserves streak).
 
@@ -54,7 +54,7 @@
 | Currency | Earned By | Spent On |
 |----------|-----------|----------|
 | **Coins (pts)** | Completing dares (3/5/10 pts by difficulty) | Skipping dares (-50), forfeiting challenges (-100) |
-| **Gems 💎** | Completing Hard dares (+1 gem) | Skip Tokens (5 gems), Streak Freezes (15 gems), Chicken Tax (5 gems) |
+| **Gems 💎** | Completing Hard dares (+10 points, +1 gem) | Skip Tokens (5 gems), Streak Freezes (15 gems), Chicken Tax (5 gems) |
 
 #### Rank System
 
@@ -67,7 +67,7 @@
 
 #### Streaks
 - Complete a dare every day to build your **weekly progress** (7-day streak).
-- After 7 consecutive days, earn a **streak bonus** and activate a score multiplier.
+- After 7 consecutive days, earn a **streak bonus** and activate a score multiplier.(2x,3x,4x,etc.)
 - **Streak Freezes** protect your streak if you miss a day (purchasable with gems).
 
 ### 🏅 Leaderboard
