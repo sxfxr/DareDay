@@ -247,6 +247,7 @@ DareDay uses a **dark neon aesthetic** with glassmorphism and glow effects:
 ## 📄 License
 
 This project is private and not currently published under an open-source license.
+Created by Mark Joseph, Praful Gopi, Mohammed Safar and Arjun Manoj
 
 ---
 
